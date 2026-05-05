@@ -7,7 +7,7 @@
 
 ## ¿Qué es RiskCore?
 
-RiskCore es el **sistema backend core de una aseguradora**. Simula exactamente lo que usaría una empresa como Mapfre o Allianz para gestionar su operación diaria: registrar clientes, emitir pólizas, procesar siniestros, notificar a los asegurados, y mantener un historial inmutable de todo lo que ocurre.
+RiskCore es el **sistema backend core de una aseguradora**. Gestiona la operación diaria: registrar clientes, emitir pólizas, procesar siniestros, notificar a los asegurados, y mantener un historial inmutable de todo lo que ocurre.
 
 Está construido como **microservicios** — en lugar de ser una sola aplicación grande, son 4 servicios Django independientes que se comunican entre sí. Cada servicio hace una cosa, la hace bien, y no depende directamente de los otros para funcionar.
 
@@ -52,10 +52,12 @@ Eso es exactamente lo que implementa RiskCore.
 Gestiona todo lo relacionado con clientes y pólizas. Es el servicio más importante porque todos los demás dependen (directa o indirectamente) de los datos que genera este servicio.
 
 **Entidades que maneja:**
-- `Customer` — el asegurado (nombre, DNI, email, teléfono)
-- `Policy` — la póliza (tipo, fechas, prima, estado)
-- `Coverage` — las coberturas de cada póliza
-- `PolicyDocument` — documentos adjuntos a la póliza
+- `Customer` — id (UUID), full_name, email, dni, phone, birth_date, address, created_at
+- `Policy` — id (UUID), customer (FK), policy_type, status, start_date, end_date, premium_amount, payment_frequency, policy_number (auto-generado), created_at, updated_at
+- `Coverage` — id, policy (FK), coverage_type, max_amount, description
+- `PolicyDocument` — id, policy (FK), document_type, file_url, uploaded_at
+
+**Estados de póliza**: `ACTIVE` → `SUSPENDED` → `CANCELLED` / `EXPIRED`
 
 **Operaciones principales:**
 - Registrar un cliente nuevo
@@ -77,9 +79,9 @@ Gestiona todo lo relacionado con clientes y pólizas. Es el servicio más import
 Gestiona el ciclo de vida completo de un siniestro: desde que el cliente lo reporta hasta que queda resuelto.
 
 **Entidades que maneja:**
-- `Claim` — el siniestro (qué pasó, cuándo, dónde, monto estimado, estado actual)
-- `ClaimDocument` — documentos del siniestro (fotos, informes, facturas)
-- `ClaimStatusHistory` — historial de todos los cambios de estado
+- `Claim` — id (UUID), policy_id (ref externa, sin FK real), claimant_name, claimant_email, incident_date, incident_type, description, estimated_damage, approved_amount, status, claim_number (auto-generado), filed_at
+- `ClaimDocument` — id, claim (FK), document_type, file_url, uploaded_at
+- `ClaimStatusHistory` — id, claim (FK), from_status, to_status, changed_by, changed_at, notes
 
 **La máquina de estados — el flujo de un siniestro:**
 
@@ -147,6 +149,10 @@ Kafka consumer recibe evento
 **¿Por qué Celery además de Kafka?**
 Kafka entrega el evento al consumer rápido. Pero el consumer no debería hacer cosas lentas (como enviar emails) porque bloquearia el procesamiento del siguiente mensaje. Celery es una cola de tareas diseñada exactamente para eso: procesar trabajos lentos en workers separados, con reintentos automáticos y monitoreo via Flower.
 
+**Entidades que maneja:**
+- `Notification` — id, event_type, recipient_email, status (PENDING/SENT/FAILED), payload (JSON del evento original)
+- `NotificationLog` — id, notification (FK), attempt_number, sent_at, error_message
+
 ---
 
 ### 4. audit-service — El historial inmutable
@@ -160,11 +166,8 @@ En el mundo de los seguros, la auditoría es un requisito legal. Si un cliente r
 **Regla de oro**: `AuditEvent` nunca se modifica ni se borra. Solo INSERT. Para siempre.
 
 **Qué guarda por cada evento:**
-- El topic Kafka y el offset (posición exacta en el log de Kafka)
-- El tipo de entidad (`policy` o `claim`) y su ID
-- El tipo de evento (`policy.created`, `claim.filed`, etc.)
-- El payload completo — un snapshot de todos los datos en ese momento
-- El timestamp del evento y el timestamp de cuando lo registró
+- `AuditEvent` — id (UUID), kafka_topic, kafka_offset, entity_type, entity_id, event_type, payload (JSON completo del evento), occurred_at, recorded_at
+- Solo INSERT — sin UPDATE ni DELETE jamás (requisito regulatorio)
 
 ---
 
@@ -376,25 +379,6 @@ El dashboard muestra:
                     │  Flower (Celery monitor)                 │
                     └────────────────────────────────────────┘
 ```
-
----
-
-## Preguntas que te Van a Hacer en Entrevista
-
-### "¿Por qué microservicios y no un monolito?"
-> "Para este dominio, los microservicios tienen sentido porque los ciclos de vida son independientes. El equipo que trabaja en siniestros puede deployar claims-service sin tocar policy-service. Además, si la carga de siniestros sube (temporada de tormentas, por ejemplo), podés escalar solo claims-service sin escalar toda la aplicación. Dicho eso, también entiendo que para un equipo pequeño un monolito modular puede ser más práctico — la decisión depende del contexto."
-
-### "¿Por qué Kafka y no RabbitMQ?"
-> "Kafka nos da durabilidad y replay. Si audit-service cae un momento, cuando vuelve puede releer los mensajes desde donde quedó — no se pierde ningún evento. Con RabbitMQ los mensajes se consumen y desaparecen. Para un audit log en el dominio de seguros, que es un requisito regulatorio, no podemos permitir pérdida de eventos."
-
-### "¿Cómo manejás la consistencia entre servicios?"
-> "Usamos consistencia eventual para la mayoría de los casos. Cuando se crea una póliza, el evento Kafka garantiza que audit-service y notification-service eventualmente lo van a procesar. Para el único caso donde necesitamos consistencia inmediata — verificar que la póliza existe antes de crear un siniestro — usamos HTTP síncrono entre servicios con timeout explícito."
-
-### "¿Cómo trazás un error a través de múltiples servicios?"
-> "El gateway genera un X-Request-ID único por cada request y lo propaga como header a todos los servicios. Cada servicio incluye ese ID en todos sus logs estructurados (JSON via structlog). En Grafana + Loki, puedo filtrar por ese ID y ver exactamente qué pasó en cada servicio para ese request específico."
-
-### "¿Qué pasa si notification-service cae?"
-> "Los mensajes siguen acumulándose en Kafka. Kafka los retiene según la política de retención configurada (por defecto 7 días). Cuando notification-service vuelve, continúa consumiendo desde donde se quedó usando el consumer group offset. El cliente recibirá su email con retraso, pero no se pierde."
 
 ---
 

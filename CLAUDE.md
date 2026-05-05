@@ -9,7 +9,7 @@
 
 ## Qué es este proyecto
 
-**RiskCore** es un sistema backend de microservicios que simula el core de una aseguradora enterprise (estilo Mapfre/Allianz). Proyecto de portfolio orientado a consultoras que piden experiencia en sistemas distribuidos.
+**RiskCore** es un sistema backend de microservicios que simula el core de una aseguradora enterprise. Proyecto de portfolio orientado a sistemas distribuidos.
 
 **Dominio**: gestión de pólizas y siniestros con event-driven architecture.
 **Objetivo**: demostrar microservicios, Kafka, Celery, observabilidad, y patrones enterprise en Python + Next.js.
@@ -22,8 +22,8 @@ Los docs viven en `docs/`. El `README.md` y este `CLAUDE.md` viven en la raíz.
 
 | Archivo | Qué contiene |
 |---|---|
-| [`docs/GUIA_PROYECTO.md`](docs/GUIA_PROYECTO.md) | Dominio del negocio, flujos completos, preguntas de entrevista |
-| [`docs/PLAN_COMPLETO.md`](docs/PLAN_COMPLETO.md) | Stack con versiones, estructura del monorepo, módulos |
+| [`docs/GUIA_PROYECTO.md`](docs/GUIA_PROYECTO.md) | Dominio del negocio, flujos completos, arquitectura y servicios |
+
 | [`docs/TECHNICAL_DECISIONS.md`](docs/TECHNICAL_DECISIONS.md) | Justificación de cada decisión técnica |
 | [`docs/API_DESIGN.md`](docs/API_DESIGN.md) | Endpoints completos con request/response + WebSocket |
 | [`docs/PHASES.md`](docs/PHASES.md) | Fases de desarrollo con checklists y cierre de PR |
@@ -138,7 +138,6 @@ riskcore/
 │   └── grafana/dashboards/
 ├── docs/
 │   ├── GUIA_PROYECTO.md
-│   ├── PLAN_COMPLETO.md
 │   ├── TECHNICAL_DECISIONS.md
 │   ├── API_DESIGN.md
 │   └── PHASES.md

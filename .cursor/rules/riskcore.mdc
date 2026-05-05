@@ -6,7 +6,7 @@ alwaysApply: true
 # RiskCore — Project Rules
 
 ## What is this project
-Insurance microservices backend portfolio project (Mapfre/Allianz style). 4 Django microservices + Next.js 15 dashboard + Kafka event-driven architecture.
+Insurance microservices backend. 4 Django microservices + Next.js 15 dashboard + Kafka event-driven architecture.
 
 > 📍 **Read `CONTEXT.md` first** — it has the current project state, active phase, and next step.
 

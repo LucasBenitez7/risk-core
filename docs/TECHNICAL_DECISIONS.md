@@ -1,6 +1,6 @@
 # TECHNICAL DECISIONS — RiskCore
 
-> Decisiones técnicas con justificación. Referencia para implementación y para explicar en entrevista.
+> Decisiones técnicas con justificación. Referencia para implementación.
 
 ---
 
@@ -11,9 +11,6 @@
 **Razón**: cada servicio tiene su propia DB, su propio ciclo de deploy, y se comunica exclusivamente via Kafka o HTTP. Implementa correctamente el patrón **Database per Service** — el anti-patrón más común en microservicios mal hechos es compartir DB entre servicios.
 
 **Alternativa descartada**: monolito modular. Descartado porque el objetivo del proyecto es demostrar microservicios con event-driven architecture como portfolio.
-
-**Cómo explicarlo en entrevista**:
-> "Cada servicio tiene su propia base de datos — policy-service no puede hacer JOIN con la tabla de claims. Toda comunicación es via eventos Kafka o HTTP síncrono cuando la consistencia inmediata es necesaria."
 
 ---
 
@@ -29,7 +26,7 @@
 - Más activo en mantenimiento y soporte
 - kafka-python tiene issues conocidos con reconexión en producción
 
-**Alternativa descartada**: RabbitMQ. Descartado porque Kafka permite replay de mensajes históricos (fundamental para el audit log), tiene mejor throughput para miles de eventos/segundo, y es lo que usan empresas enterprise tipo Mapfre en sus core systems.
+**Alternativa descartada**: RabbitMQ. Descartado porque Kafka permite replay de mensajes históricos (fundamental para el audit log), tiene mejor throughput para miles de eventos/segundo, y es el estándar enterprise para sistemas event-driven.
 
 **Patrón de Consumer Groups**:
 ```
@@ -38,9 +35,6 @@ topic: policy.created
   consumer-group: notification-consumers → notification-service (offset propio)
 ```
 Cada consumer group mantiene su propio offset en el topic — si notification-service va más lento, no bloquea a audit-service.
-
-**Cómo explicarlo en entrevista**:
-> "Usamos consumer groups para que cada servicio consuma los eventos a su propio ritmo. Si notification-service tiene un pico de carga, sus mensajes no se pierden — siguen en Kafka esperando. El offset de cada consumer group es independiente."
 
 ---
 
@@ -312,9 +306,6 @@ VALID_TRANSITIONS = {
 
 **Por qué no Vite + React SPA**: el dashboard necesita SSR para carga inicial rápida y SEO básico en la página de login. Next.js da eso sin configuración extra.
 
-**Cómo explicarlo en entrevista**:
-> "Usamos App Router porque es el futuro de Next.js. Server Components nos permiten hacer fetch de datos iniciales sin exponer la API key al cliente, y los layouts anidados simplifican la estructura del dashboard sin prop drilling."
-
 ---
 
 ## 16. Estado Global Frontend — Zustand
@@ -326,9 +317,6 @@ VALID_TRANSITIONS = {
 **Alternativa descartada — Redux Toolkit**: demasiado boilerplate para el tamaño del estado que necesitamos. Redux tiene sentido cuando hay múltiples equipos tocando el mismo estado o cuando el estado es muy complejo. Para un dashboard con 3-4 stores pequeñas, Zustand es la elección correcta.
 
 **Alternativa descartada — Jotai/Recoil**: atom-based state es ideal para estado derivado complejo. El dashboard no tiene ese nivel de complejidad reactiva.
-
-**Cómo explicarlo en entrevista**:
-> "Zustand porque el estado del dashboard es simple: websocket events, filtros activos, UI state. No necesitamos Redux para eso — la regla es usar la herramienta más simple que resuelva el problema."
 
 ---
 
@@ -348,9 +336,6 @@ VALID_TRANSITIONS = {
 **Por qué JWT en query param y no en header**: los WebSockets estándar del browser no permiten headers custom en el handshake. La alternativa es enviar el token como primer mensaje tras conectar, pero complica el consumer. Query param es el patrón estándar para WS auth.
 
 **Channel groups**: todos los clientes conectados están en el grupo `"events"`. Cualquier evento Kafka llega a todos. Si en el futuro se necesita filtrado por usuario, se crean grupos individuales.
-
-**Cómo explicarlo en entrevista**:
-> "Django Channels nos da WebSockets sobre ASGI con muy poco código. El JWT va en el query param porque el browser no permite headers en el WS handshake. El canal Redis conecta el consumer Kafka con el consumer WebSocket — cuando llega un evento Kafka, el consumer lo publica en Redis y Channels lo pushea a todos los clientes conectados."
 
 ---
 
@@ -388,7 +373,7 @@ type CreatePolicyForm = z.infer<typeof createPolicySchema>; // tipo automático
 
 **Decisión**: Conventional Commits enforced via commitlint en pre-commit. `.releaserc.json` configurado para semantic-release.
 
-**Razón**: conventional commits permiten generar changelogs automáticos y versionar con semantic-release. Para un portfolio, tener un CHANGELOG.md bien formado es un diferencial. Los recruiters técnicos revisan el historial de commits.
+**Razón**: conventional commits permiten generar changelogs automáticos y versionar con semantic-release.
 
 **Reglas críticas del workflow**:
 - Nunca commit directo a `main` o `dev`
@@ -397,9 +382,6 @@ type CreatePolicyForm = z.infer<typeof createPolicySchema>; // tipo automático
 - Un PR por fase de desarrollo
 
 **Scopes válidos**: `policy`, `claims`, `notifications`, `audit`, `infra`, `frontend`, `gateway`, `api`
-
-**Cómo explicarlo en entrevista**:
-> "Conventional commits nos dan trazabilidad y la posibilidad de automatizar releases. El CI verifica el formato del mensaje antes de aceptar el PR — si el mensaje no cumple el formato, el pipeline falla."
 
 ---
 
@@ -461,9 +443,6 @@ RUN uv sync --frozen --no-dev
 
 **Package manager frontend**: pnpm 10.24.0 (no relacionado con uv — son ecosistemas separados).
 
-**Cómo explicarlo en entrevista**:
-> "Usamos uv del mismo equipo que Ruff — ambos escritos en Rust para máximo rendimiento. En CI, instalar las dependencias de un servicio tarda menos de 5 segundos con uv frente a 30-60 con pip. El uv.lock garantiza que desarrollo, CI y Railway tienen exactamente las mismas versiones."
-
 ---
 
 ## 23. Deploy — Railway
@@ -476,5 +455,4 @@ RUN uv sync --frozen --no-dev
 
 **Alternativa descartada**: Heroku. Eliminó el free tier y es más caro que Railway para el mismo resultado. Render es similar a Railway pero tiene menos opciones de networking entre servicios.
 
-**Cómo explicarlo en entrevista**:
-> "Railway nos da deploys automáticos desde GitHub, base de datos managed, y networking privado entre servicios sin DevOps overhead. Para un proyecto de portfolio, lo que importa es que el sistema funcione en producción — Railway nos permite demostrarlo sin invertir semanas en infraestructura."
+---

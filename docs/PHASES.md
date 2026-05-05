@@ -9,23 +9,23 @@
 
 | Fase | Nombre | Estimado | Rama |
 |---|---|---|---|
-| 0 | Setup e Infraestructura | 1 semana | `feat/phase-0-setup` |
-| 1 | policy-service | 1.5 semanas | `feat/phase-1-policy-service` |
-| 2 | claims-service | 1.5 semanas | `feat/phase-2-claims-service` |
-| 3 | audit-service + notification-service | 1 semana | `feat/phase-3-consumers` |
-| 4 | Observabilidad | 1 semana | `feat/phase-4-observability` |
-| 5 | Gateway + Rate Limiting | 0.5 semanas | `feat/phase-5-gateway` |
-| 6 | Load Testing | 0.5 semanas | `feat/phase-6-load-testing` |
-| 7 | Frontend Dashboard | 1 semana | `feat/phase-7-frontend` |
+| 0 | Setup e Infraestructura | 1 días | `feat/phase-0-setup` |
+| 1 | policy-service | 1.5 días | `feat/phase-1-policy-service` |
+| 2 | claims-service | 1.5 días | `feat/phase-2-claims-service` |
+| 3 | audit-service + notification-service | 1 día | `feat/phase-3-consumers` |
+| 4 | Observabilidad | 1 día | `feat/phase-4-observability` |
+| 5 | Gateway + Rate Limiting | 0.5 día | `feat/phase-5-gateway` |
+| 6 | Load Testing | 0.5 día | `feat/phase-6-load-testing` |
+| 7 | Frontend Dashboard | 1 día | `feat/phase-7-frontend` |
 
-**Total estimado**: ~8 semanas trabajando en paralelo con la búsqueda de empleo.
+**Total estimado**: ~8 días trabajando en paralelo con la búsqueda de empleo.
 
 ---
 
 ## Fase 0 — Setup e Infraestructura
 
 **Rama**: `feat/phase-0-setup`
-**Estimado**: 1 semana
+**Estimado**: 1 día
 
 **Objetivo**: el monorepo existe, Docker Compose levanta todos los servicios en un comando, Kafka tiene los 6 topics creados, y cada servicio responde `GET /health`. No hay lógica de negocio todavía — solo el esqueleto.
 
@@ -74,7 +74,7 @@
 - [ ] `pre-commit install --hook-type commit-msg` para validar mensajes
 
 **Monorepo y estructura**
-- [ ] Estructura de carpetas completa según `PLAN_COMPLETO.md`
+- [ ] Estructura de carpetas completa según `GUIA_PROYECTO.md`
 - [ ] `README.md` raíz con instrucciones de setup local completas (`git clone` → `make dev` → `curl /health`)
 - [ ] `.releaserc.json` configurado para semantic-release
 - [ ] `Makefile` con comandos: `dev`, `infra`, `test`, `lint`, `kafka-setup`, `logs`, `shell`
@@ -413,7 +413,7 @@ echo "feat(policy): test commit" | pre-commit run commitizen --hook-stage commit
 ## Fase 1 — policy-service
 
 **Rama**: `feat/phase-1-policy-service`
-**Estimado**: 1.5 semanas
+**Estimado**: 1.5 días
 
 **Objetivo**: se puede crear clientes, crear pólizas, consultarlas y cancelarlas via API. Cada operación emite el evento Kafka correspondiente. Los endpoints están documentados en Swagger.
 
@@ -489,7 +489,7 @@ docker exec -it kafka kafka-console-consumer.sh \
 ## Fase 2 — claims-service
 
 **Rama**: `feat/phase-2-claims-service`
-**Estimado**: 1.5 semanas
+**Estimado**: 1.5 días
 
 **Objetivo**: se puede reportar un siniestro sobre una póliza existente, actualizar su estado siguiendo la máquina de estados definida, y resolver el siniestro. Cada transición emite evento Kafka. La comunicación síncrona con policy-service funciona correctamente.
 
@@ -547,7 +547,7 @@ docker exec -it kafka kafka-console-consumer.sh \
 ## Fase 3 — audit-service + notification-service
 
 **Rama**: `feat/phase-3-consumers`
-**Estimado**: 1 semana
+**Estimado**: 1 día
 
 **Objetivo**: los eventos Kafka son consumidos por dos servicios independientes. El audit-service registra todos los eventos de forma inmutable. El notification-service procesa los eventos relevantes y envía emails via Celery.
 
@@ -615,7 +615,7 @@ open http://localhost:5555
 ## Fase 4 — Observabilidad
 
 **Rama**: `feat/phase-4-observability`
-**Estimado**: 1 semana
+**Estimado**: 1 día
 
 **Objetivo**: Grafana muestra métricas en tiempo real y logs de todos los servicios. Se puede diagnosticar cualquier error sin conectarse al servidor. Los dashboards están preconfigurados y funcionan desde el primer `make dev`.
 
@@ -684,7 +684,7 @@ open http://localhost:3000   # Grafana con todos los dashboards cargados
 ## Fase 5 — Gateway + Rate Limiting
 
 **Rama**: `feat/phase-5-gateway`
-**Estimado**: 0.5 semanas
+**Estimado**: 0.5 día
 
 **Objetivo**: hay un único punto de entrada al sistema. El gateway valida JWT, aplica rate limiting, y propaga X-Request-ID a todos los servicios para trazar requests en Grafana.
 
@@ -716,9 +716,9 @@ open http://localhost:3000   # Grafana con todos los dashboards cargados
 ## Fase 6 — Load Testing
 
 **Rama**: `feat/phase-6-load-testing`
-**Estimado**: 0.5 semanas
+**Estimado**: 0.5 día
 
-**Objetivo**: el sistema aguanta carga real. Tenés números concretos para contar en entrevista — igual que hacés con k6 en TicketMaster, pero con locust en contexto distribuido.
+**Objetivo**: el sistema aguanta carga real. Se documentan los resultados con locust en contexto distribuido.
 
 ### Entregables
 
@@ -766,7 +766,7 @@ open http://localhost:3000   # Grafana con todos los dashboards cargados
 ## Fase 7 — Frontend Dashboard
 
 **Rama**: `feat/phase-7-frontend`
-**Estimado**: 1 semana
+**Estimado**: 1 día
 
 **Objetivo**: dashboard visual en Next.js 15 que muestra el estado del sistema en tiempo real via WebSockets. No es el foco del portfolio (es backend), pero demuestra que podés integrar un frontend moderno.
 

@@ -10,8 +10,8 @@
 
 **Fase**: 0 — Setup e Infraestructura  
 **Rama activa**: `feat/phase-0-setup`  
-**Última tarea completada**: Setup de instrucciones, skills y documentación base  
-**Próximo paso**: Inicializar repositorio git y crear estructura de carpetas del monorepo  
+**Última tarea completada**: Git init, primer commit, ramas (main/dev/feat/phase-0-setup), .gitignore, COMANDOS.md  
+**Próximo paso**: Crear `.pre-commit-config.yaml` y estructura de carpetas del monorepo  
 
 ---
 
@@ -36,6 +36,11 @@
 - ✅ Instrucciones para agentes (CLAUDE.md, .cursor/rules, .clinerules)
 - ✅ Slash commands (`.claude/commands/`)
 - ✅ Skills instalados (`.agents/skills/`)
+- ✅ Git init, ramas (main, dev, feat/phase-0-setup)
+- ✅ `.gitignore`
+- ✅ `COMANDOS.md`
+- ✅ Primer commit (`chore(infra): initial project setup with documentation and agent configs`)
+- ❌ `.pre-commit-config.yaml`
 - ❌ Código del proyecto (no iniciado aún)
 - ❌ Docker Compose / infraestructura
 - ❌ Servicios Django
