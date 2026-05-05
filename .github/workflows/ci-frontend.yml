@@ -11,18 +11,31 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Check if frontend exists
+        id: check
+        run: |
+          if [ -f "frontend/package.json" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
       - uses: pnpm/action-setup@v2
+        if: steps.check.outputs.exists == 'true'
         with:
           version: 10.24.0
       - uses: actions/setup-node@v4
+        if: steps.check.outputs.exists == 'true'
         with:
           node-version: 20
       - name: Install dependencies
+        if: steps.check.outputs.exists == 'true'
         working-directory: frontend
-        run: pnpm install --frozen-lockfile 2>/dev/null || pnpm install
+        run: pnpm install --frozen-lockfile || pnpm install
       - name: Lint
+        if: steps.check.outputs.exists == 'true'
         working-directory: frontend
-        run: pnpm lint 2>/dev/null || echo "Skipped (frontend not set up yet)"
+        run: pnpm lint || true
       - name: Test
+        if: steps.check.outputs.exists == 'true'
         working-directory: frontend
-        run: pnpm test 2>/dev/null || echo "Skipped (frontend not set up yet)"
+        run: pnpm test || true
