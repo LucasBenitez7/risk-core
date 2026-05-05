@@ -48,5 +48,4 @@ dist/
 build/
 *.log
 
-# detect-secrets baseline (keep under version control separately)
-.secrets.baseline
+# detect-secrets baseline is committed to the repo

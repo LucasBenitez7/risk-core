@@ -1,0 +1,20 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.0
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        args:
+          - --baseline
+          - .secrets.baseline
+        exclude: ^(.agents/|.claude/|.cursor/|.windsurf/|skills-lock.json|.github/|infra/docker-compose.yml)
+  - repo: https://github.com/commitizen-tools/commitizen
+    rev: v4.0.0
+    hooks:
+      - id: commitizen
+        stages: [commit-msg]
