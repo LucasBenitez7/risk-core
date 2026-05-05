@@ -5,6 +5,10 @@ on:
     paths:
       - "policy-service/**"
       - ".github/workflows/ci-policy-service.yml"
+  pull_request:
+    paths:
+      - "policy-service/**"
+      - ".github/workflows/ci-policy-service.yml"
 
 jobs:
   test:

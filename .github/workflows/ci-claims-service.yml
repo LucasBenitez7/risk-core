@@ -5,6 +5,10 @@ on:
     paths:
       - "claims-service/**"
       - ".github/workflows/ci-claims-service.yml"
+  pull_request:
+    paths:
+      - "claims-service/**"
+      - ".github/workflows/ci-claims-service.yml"
 
 jobs:
   test:

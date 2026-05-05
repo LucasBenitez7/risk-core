@@ -5,6 +5,10 @@ on:
     paths:
       - "audit-service/**"
       - ".github/workflows/ci-audit-service.yml"
+  pull_request:
+    paths:
+      - "audit-service/**"
+      - ".github/workflows/ci-audit-service.yml"
 
 jobs:
   test:

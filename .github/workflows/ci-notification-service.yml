@@ -5,6 +5,10 @@ on:
     paths:
       - "notification-service/**"
       - ".github/workflows/ci-notification-service.yml"
+  pull_request:
+    paths:
+      - "notification-service/**"
+      - ".github/workflows/ci-notification-service.yml"
 
 jobs:
   test:
