@@ -42,6 +42,7 @@ Thumbs.db
 .coverage.*
 htmlcov/
 .pytest_cache/
+*.sqlite3
 
 # Build
 dist/
