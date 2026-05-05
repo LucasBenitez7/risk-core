@@ -42,7 +42,7 @@ jobs:
         run: pip install uv
       - name: Install dependencies
         working-directory: notification-service
-        run: uv sync --frozen || uv sync
+        run: uv sync --extra dev
       - name: Ruff
         working-directory: notification-service
         run: uv run ruff check .

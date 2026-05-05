@@ -15,8 +15,7 @@ venv/
 *.pem
 *.key
 
-# uv
-uv.lock
+# uv.lock is committed to the repo for reproducible builds
 
 # Node
 node_modules/
