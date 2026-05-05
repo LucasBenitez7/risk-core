@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:skills.sh)",
+      "WebFetch(domain:github.com)",
+      "Bash(npx skills *)",
+      "Read(//mnt/c/Users/lucas/**)",
+      "Bash(cmd.exe /c \"dir C:\\\\Users\\\\lucas\\\\Desktop\\\\*.md\")",
+      "Bash(cmd.exe /c \"dir C:\\\\Users\\\\lucas\\\\Desktop\\\\*.md /b 2>nul & dir C:\\\\Users\\\\lucas\\\\Desktop\\\\risk-core\\\\iniciar-proyecto.md /b 2>nul\")"
+    ]
+  }
+}

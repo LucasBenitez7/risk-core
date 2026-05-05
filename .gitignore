@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+*.egg
+.venv/
+venv/
+*.so
+
+# Secrets
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# uv
+uv.lock
+
+# Node
+node_modules/
+.next/
+out/
+
+# Docker
+.docker/
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+
+# Build
+dist/
+build/
+*.log
+
+# detect-secrets baseline (keep under version control separately)
+.secrets.baseline
