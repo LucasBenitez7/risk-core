@@ -409,6 +409,142 @@ known-first-party = ["apps", "config"]
 
 ---
 
+## 22. Límites de Recursos y Control de Costos — Free Tier
+
+> Aplica a producción en Railway + Upstash Kafka + Upstash Redis. En local, sin limitaciones.
+
+El objetivo es que el sistema funcione en producción con coste cercano a cero durante la fase de portfolio. Cada servicio y componente tiene límites explícitos configurados para mantenerse en el free tier.
+
+### Kafka — Upstash Free Tier
+
+**Límites del plan gratuito**: 10.000 mensajes/día, 100 MB de almacenamiento total.
+
+**Configuración de topics para minimizar almacenamiento**:
+```bash
+# Retención: 1 día en producción (en local: 7 días para desarrollo)
+kafka-topics.sh --create --topic policy.created \
+  --config retention.ms=86400000 \   # 1 día
+  --config retention.bytes=10485760 \ # 10 MB máximo por topic
+  --partitions 1 \                    # 1 partición (free tier, no necesitamos más)
+  --replication-factor 1
+```
+
+**Regla de producción**: 1 partición por topic, retención de 1 día, sin compresión (overhead mayor que el ahorro para este volumen). En local Docker: 3 particiones, 7 días de retención.
+
+**Si el límite de 10K msg/día se supera**: Upstash bloquea el producer. Los servicios deben manejar `KafkaException` en el producer sin interrumpir el flujo principal — el evento se pierde pero la operación de DB ya se completó.
+
+```python
+# en events.py — producción nunca debe fallar por Kafka
+try:
+    self._producer.flush(timeout=3)
+except Exception:
+    logger.warning("kafka_produce_failed", event_type=event_type, policy_id=...)
+    # No re-raise — la operación DB ya commitió
+```
+
+### Redis — Upstash Redis Free Tier
+
+**Límites del plan gratuito**: 10.000 comandos/día, 256 MB de almacenamiento.
+
+**Usos de Redis en este proyecto**:
+| Uso | Servicio | Comandos/día estimados |
+|---|---|---|
+| Celery broker (colas de tareas) | notification-service | ~500 (bajo volumen) |
+| Celery result backend | notification-service | ~500 |
+| Django Channels layer | audit-service | ~200 (WebSocket) |
+
+**Configuración Celery para minimizar comandos Redis**:
+```python
+# config/celery.py — notification-service
+app.conf.update(
+    broker_url=config("REDIS_URL"),
+    result_backend=config("REDIS_URL"),
+    result_expires=3600,          # resultados expiran en 1 hora (libera memoria)
+    task_serializer="json",
+    result_serializer="json",
+    worker_concurrency=1,         # 1 worker en producción (Railway free tier = 512MB RAM)
+    worker_prefetch_multiplier=1, # no prefetch agresivo — procesar de a 1
+    task_acks_late=True,          # ACK tras completar, no al recibir
+)
+```
+
+**Regla**: `worker_concurrency=1` en producción. Railway Starter plan tiene 512MB RAM — múltiples workers Celery agotan la memoria. 1 worker es suficiente para el volumen de portfolio.
+
+### PostgreSQL — Connection Pooling
+
+**Problema**: cada proceso Django abre conexiones a PostgreSQL. Con `worker_concurrency=1` en Celery y Gunicorn con 2 workers, cada servicio abre ~4-6 conexiones. Railway PostgreSQL Starter tiene límite de 25 conexiones simultáneas en total.
+
+**Configuración `CONN_MAX_AGE` para reusar conexiones**:
+```python
+# config/settings/production.py
+DATABASES = {
+    "default": {
+        ...
+        "CONN_MAX_AGE": 60,   # reusar conexión hasta 60s antes de cerrar
+        "OPTIONS": {
+            "connect_timeout": 10,
+        },
+    }
+}
+```
+
+**Distribución de conexiones por servicio** (máximo 25 totales Railway):
+| Servicio | Workers Gunicorn | CONN_MAX_AGE | Conexiones máx |
+|---|---|---|---|
+| policy-service | 2 | 60s | 4 |
+| claims-service | 2 | 60s | 4 |
+| notification-service | 2 web + 1 Celery | 60s | 6 |
+| audit-service | 2 | 60s | 4 |
+| **Total** | | | **18** (margen de 7) |
+
+### Gunicorn — Workers en Producción
+
+**Regla**: `2 workers` por servicio en Railway Starter (512MB RAM por servicio).
+
+```dockerfile
+# En cada Dockerfile
+CMD ["gunicorn", "config.wsgi:application",
+     "--bind", "0.0.0.0:8000",
+     "--workers", "2",
+     "--timeout", "30",
+     "--keep-alive", "5"]
+```
+
+La fórmula estándar `(2 × CPU) + 1` daría más workers, pero en Railway free tier con 0.5 vCPU compartida, 2 workers es el balance correcto entre concurrencia y memoria.
+
+### Celery — Límites de Reintentos
+
+**Problema**: reintentos infinitos o muy frecuentes queman Redis y Railway compute.
+
+```python
+# notification-service/apps/notifications/tasks.py
+@shared_task(
+    bind=True,
+    max_retries=3,            # máximo 3 reintentos (no infinitos)
+    default_retry_delay=300,  # 5 minutos entre reintentos (no 60s — menos Redis commands)
+    soft_time_limit=25,       # la task debe completar en 25s
+    time_limit=30,            # hard kill a los 30s
+)
+def send_email_notification(self, notification_id: str) -> None:
+    ...
+```
+
+**Por qué 5 minutos entre reintentos**: con 60s de delay y 3 reintentos, si SMTP falla, quemas 3 slots de tus 10K comandos Redis en 3 minutos. Con 5 minutos, das tiempo a que SMTP se recupere y espacias el uso de Redis.
+
+### Rate Limiting — Protección de Costos
+
+El rate limiting del gateway (Sección 9) también actúa como protección de costos: un cliente abusivo que hace 10.000 requests/hora podría agotar el free tier de Kafka (10K msg/día) en una hora. Con el límite de 200 req/min por JWT, el máximo teórico es 288.000 requests/día, pero solo ~10% generan eventos Kafka → ~28.000 eventos. Esto supera el free tier.
+
+**Mitigación**: en producción, el límite con JWT debe reducirse a **60 req/min** (en vez de 200 req/min) para mantenerse dentro del free tier de Upstash:
+```nginx
+# gateway/nginx.conf — producción
+limit_req_zone $http_authorization zone=api_auth:10m rate=60r/m;
+```
+
+En desarrollo local, mantener 200 req/min para no limitar las pruebas.
+
+---
+
 ## 22. Package Manager Backend — uv
 
 **Decisión**: uv (Astral) como única herramienta de gestión de entornos y dependencias Python. Reemplaza pip, virtualenv, pip-tools, y pyenv en un solo binario.
