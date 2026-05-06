@@ -47,7 +47,7 @@ El único permiso válido es que el usuario diga explícitamente: *"sí, commite
 | Recurso | Cuándo leerlo |
 |---|---|
 | `CONTEXT.md` | **Siempre al inicio de cada sesión** — estado, fase, reglas activas |
-| `docs/PHASES.md` | Cuando `/next-step` o `/phase-checklist` lo indiquen |
+| `docs/PHASES.md` | Como referencia detallada de checklists por fase (CONTEXT.md tiene el estado activo) |
 | `docs/API_DESIGN.md` | Al crear endpoints — tiene los schemas request/response exactos |
 | `docs/TECHNICAL_DECISIONS.md` | Si necesitas entender POR QUÉ se hizo algo así |
 | `docs/GUIA_PROYECTO.md` | Para entender el dominio de negocio (pólizas, siniestros) |

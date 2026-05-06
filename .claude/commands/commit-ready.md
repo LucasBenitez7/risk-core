@@ -11,16 +11,6 @@ Revisa los cambios actuales y prepara el commit con mensaje bien formado. El age
 5. **Preguntar al usuario cuál grupo commitear primero y esperar su respuesta**
 6. El usuario decide cuándo y en qué orden se hacen los commits
 
-## Regla absoluta
-
-**El agente NUNCA ejecuta `git commit` ni `git push` sin que el usuario lo confirme explícitamente.**
-
-El flujo correcto es:
-1. `/commit-ready` → agente propone mensajes
-2. Usuario dice "sí, commitea el primero" o "commitea con este mensaje: ..."
-3. Agente ejecuta el commit solo con ese grupo de archivos
-4. Repetir para cada grupo
-
 ## Formato de propuesta de commits
 
 ```

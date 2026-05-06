@@ -6,14 +6,16 @@ Ejemplo: `/phase-checklist 1`
 
 ## Qué hacer con este comando
 
-1. Leer el archivo `PHASES.md` y localizar la fase indicada
-2. Para cada ítem del checklist, verificar si ya existe en el repositorio:
+1. Leer `CONTEXT.md` — Sección 4 (Plan detallado) tiene el checklist activo con `[x]` / `[ ]`
+2. Leer `docs/PHASES.md` para el checklist detallado de la fase (entregables completos)
+3. Para cada ítem, verificar si ya existe en el repositorio:
    - Archivos: usar `ls` o `Glob` para verificar que existen
    - Endpoints: verificar en el código que el ViewSet y URL están implementados
    - Tests: verificar que existen los archivos de test y que pasan con `pytest`
    - Docker: verificar que el servicio está en `docker-compose.yml`
-3. Mostrar el resumen: ✅ completado / ❌ pendiente / ⚠️ parcial
-4. Sugerir cuál es el siguiente ítem más importante a implementar
+4. Si hay discrepancia entre CONTEXT.md y PHASES.md, **CONTEXT.md manda** (es la fuente de verdad del estado)
+5. Mostrar el resumen: ✅ completado / ❌ pendiente / ⚠️ parcial
+6. Sugerir cuál es el siguiente ítem más importante a implementar
 
 ## Formato de respuesta esperado
 

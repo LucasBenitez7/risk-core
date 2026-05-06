@@ -338,10 +338,11 @@ _Ninguno por ahora._
 ## 10. Protocolo — Al terminar una fase completa
 
 1. Verificar que TODOS los `[ ]` del plan están marcados `[x]`
-2. Actualizar tabla de [Sección 5](#s5): ⏳ → ✅
-3. Reemplazar [Sección 2](#s2) con las reglas de la SIGUIENTE fase (ver tabla abajo)
-4. Avisar al usuario: "Fase N completa. ¿Hago `/commit-ready` para preparar los commits?"
-5. Solo después de commits confirmados y push → el usuario decide si crear PR
+2. Actualizar tabla de [Sección 5](#s5): ⏳ → ✅, siguiente fase → ⏳
+3. **Sincronizar `docs/PHASES.md`** — actualizar la tabla resumen para que refleje el mismo estado que Sección 5
+4. Reemplazar [Sección 2](#s2) con las reglas de la SIGUIENTE fase (ver tabla abajo)
+5. Avisar al usuario: "Fase N completa. ¿Hago `/commit-ready` para preparar los commits?"
+6. Solo después de commits confirmados y push → el usuario decide si crear PR
 
 **Reglas críticas por fase** (usar para actualizar Sección 2 al cambiar de fase):
 
@@ -425,8 +426,16 @@ Si es single-agente, una sola fila con Claude Code.
 
 ### Al iniciar un PROYECTO nuevo
 
-Crear un CONTEXT.md desde cero con exactamente estas 12 secciones en este orden.
-Contenido mínimo de cada sección al inicio del proyecto:
+> Guía completa para estructurar las instrucciones de un proyecto nuevo desde cero.
+> El objetivo: que cualquier agente de IA (Claude Code, Cursor, OpenCode, Cline) pueda incorporarse
+> al proyecto en cualquier fase y producir código correcto sin supervisión constante.
+
+---
+
+#### Paso 1 — Crear `CONTEXT.md` (fuente de verdad del estado)
+
+Crear con exactamente estas 12 secciones en este orden.
+Contenido mínimo de cada sección al inicio:
 
 ```
 1. Regla Absoluta          → copiar literal desde cualquier proyecto RiskCore
@@ -442,6 +451,164 @@ Contenido mínimo de cada sección al inicio del proyecto:
 11. Coordinación           → tabla de agentes de la Fase 0
 12. Esta guía              → copiar literal
 ```
+
+**Principios de CONTEXT.md:**
+- Es el archivo que MÁS cambia — se actualiza en CADA tarea completada
+- Contiene el plan activo con checkboxes `[x]` / `[ ]`
+- Cualquier agente que lea solo este archivo debe saber: qué fase, qué falta, qué reglas aplican ahora
+- Máximo ~500 líneas — si crece más, comprimir secciones antiguas
+
+---
+
+#### Paso 2 — Crear `CLAUDE.md` (reglas permanentes del proyecto)
+
+Este archivo contiene todo lo que NO cambia entre fases:
+
+| Sección obligatoria | Contenido |
+|---|---|
+| **Regla Absoluta** | No commit/push sin permiso (idéntica a CONTEXT.md — refuerzo intencional) |
+| **Jerarquía de instrucciones** | Qué archivo gana sobre cuál, cuándo leer cada doc |
+| **Qué es el proyecto** | 2-3 líneas de contexto del dominio |
+| **Stack con versiones exactas** | Tabla backend + frontend con versiones pinneadas |
+| **Arquitectura** | Servicios, puertos, comunicación, estructura de carpetas |
+| **Estructura interna de cada servicio** | Qué va en cada archivo (models, services, views, etc.) |
+| **Reglas de código obligatorias** | Patrones con ejemplos: thin views, decouple, Kafka schema, logs, errores |
+| **Reglas de negocio críticas** | Máquinas de estado, constraints regulatorios, validaciones cross-service |
+| **Variables de entorno** | Por servicio, con defaults |
+| **Testing** | Qué mockear, qué no, cobertura objetivo |
+| **Git workflow** | Branches, conventional commits, formato de PR |
+| **Comandos de desarrollo** | Makefile, uv, puertos |
+| **Lo que NUNCA hacer** | Tabla de prohibiciones con justificación |
+
+**Principios de CLAUDE.md:**
+- Cambia POCO — solo al añadir tecnología, cambiar convenciones, o descubrir nuevos "NUNCA hacer"
+- Es la referencia canónica del stack y patrones
+- Si algo se dice aquí Y en otro archivo → CLAUDE.md es la fuente de verdad del CONTENIDO
+- Skills y .clinerules deben apuntar aquí, no duplicar
+
+---
+
+#### Paso 3 — Crear `.clinerules` (referencia lean para Cline/OpenCode)
+
+**NO duplicar CLAUDE.md.** Este archivo debe ser un puntero con reglas críticas resumidas:
+
+```markdown
+# [Proyecto] — Rules for Cline / OpenCode Agents
+
+> Full rules in CLAUDE.md. This file is a quick reference.
+> If conflict → CLAUDE.md wins.
+> SYNC WARNING: When updating CLAUDE.md, verify this file.
+> Last synced: YYYY-MM-DD.
+
+## First Steps — Every Session
+1. Read CONTEXT.md
+2. Read CLAUDE.md
+
+## Critical Rules (12 reglas máximo, las más importantes)
+1. No commit sin permiso
+2. Lógica en services.py
+3. ...
+
+## Architecture (tabla de 4 líneas)
+
+## For Everything Else → see CLAUDE.md
+```
+
+**Máximo ~80 líneas.** Si crece más, estás duplicando.
+
+---
+
+#### Paso 4 — Crear `docs/PHASES.md` (checklists detallados por fase)
+
+Contiene el checklist exhaustivo de entregables de CADA fase con:
+- Modelos, endpoints, tests, verificación final, cierre de PR
+- Código ejemplo donde sea útil (CI workflows, comandos de verificación)
+- Tabla resumen al inicio con estado de cada fase
+
+**Regla de sincronización:** al cerrar una fase, actualizar la tabla resumen de PHASES.md
+para que coincida con CONTEXT.md Sección 5. CONTEXT.md es la fuente de verdad del ESTADO,
+PHASES.md es la fuente de verdad del CONTENIDO DETALLADO de cada fase.
+
+---
+
+#### Paso 5 — Crear `.claude/commands/` (slash commands)
+
+Cada comando es un archivo `.md` con instrucciones para el agente.
+
+**Comandos recomendados para cualquier proyecto:**
+
+| Comando | Propósito |
+|---|---|
+| `commit-ready.md` | Agrupar cambios y proponer mensajes de commit |
+| `next-step.md` | Recomendar el próximo ítem a implementar |
+| `phase-checklist.md` | Ver progreso de la fase actual |
+
+**Comandos específicos del dominio** (añadir según el proyecto):
+
+| Comando | Ejemplo de cuándo crearlo |
+|---|---|
+| `new-endpoint.md` | Proyectos con API REST |
+| `new-kafka-event.md` | Proyectos event-driven |
+| `write-tests.md` | Cuando hay patrones de test específicos del proyecto |
+| `new-django-service.md` | Monorepos con múltiples servicios |
+
+**Reglas para commands:**
+- No duplicar reglas que ya están en CLAUDE.md — referenciar: "ver CLAUDE.md sección X"
+- La fuente de verdad del estado es CONTEXT.md, no PHASES.md
+- Cada command debe decir QUÉ leer, en QUÉ orden, y QUÉ formato de respuesta usar
+
+---
+
+#### Paso 6 — Configurar `.agents/skills/` (patrones genéricos reutilizables)
+
+Los skills son **genéricos** — funcionan en múltiples proyectos. No contienen reglas específicas del proyecto.
+
+**Regla de oro:** si un skill contradice CLAUDE.md → CLAUDE.md gana.
+Esto ya está documentado en CLAUDE.md, pero recordar al configurar skills nuevos.
+
+Skills recomendados según el stack:
+- Django → `django-expert`, `django-patterns`
+- Testing → `test-driven-development`
+- Frontend → `next-best-practices`, `webapp-testing`
+- Review → `code-review-excellence`
+
+**No editar skills para adaptarlos al proyecto** — para eso está CLAUDE.md.
+Los skills deben permanecer genéricos y reutilizables.
+
+---
+
+#### Paso 7 — Crear `docs/` (documentación de referencia)
+
+| Archivo | Cuándo crearlo | Contenido |
+|---|---|---|
+| `GUIA_PROYECTO.md` | Al inicio | Dominio de negocio, flujos, glosario |
+| `API_DESIGN.md` | Antes de la primera API | Schemas request/response, WebSocket |
+| `TECHNICAL_DECISIONS.md` | Al tomar la primera decisión no obvia | ADRs: qué se decidió, por qué, alternativas descartadas |
+| `PHASES.md` | Al inicio | Fases con checklists (ver Paso 4) |
+
+---
+
+#### Resumen: qué va en cada archivo (evitar duplicación)
+
+| Información | Archivo canónico | Otros archivos |
+|---|---|---|
+| Estado actual (fase, rama, progreso) | `CONTEXT.md` | — |
+| Plan activo con checkboxes | `CONTEXT.md` Sección 4 | — |
+| Reglas de la fase actual | `CONTEXT.md` Sección 2 | — |
+| Stack, versiones, patrones | `CLAUDE.md` | `.clinerules` solo referencia |
+| Convenciones de código | `CLAUDE.md` | Skills son genéricos, no específicos |
+| Reglas de negocio | `CLAUDE.md` | `docs/GUIA_PROYECTO.md` para contexto amplio |
+| Checklist detallado por fase | `docs/PHASES.md` | `CONTEXT.md` tiene versión simplificada |
+| Schemas de API | `docs/API_DESIGN.md` | — |
+| Decisiones técnicas | `docs/TECHNICAL_DECISIONS.md` | `CONTEXT.md` Sección 7 solo las recientes |
+| Formato de commit/PR | `CLAUDE.md` | `commit-ready.md` solo el flujo del comando |
+
+**Regla anti-drift:** cuando necesites escribir una regla, pregúntate:
+1. ¿Ya existe en CLAUDE.md? → No duplicar, referenciar
+2. ¿Cambia entre fases? → Va en CONTEXT.md
+3. ¿Es genérica y reutilizable? → Va en un skill
+4. ¿Es un checklist de entregables? → Va en PHASES.md
+5. ¿Es el flujo de un comando? → Va en `.claude/commands/`
 
 ---
 
