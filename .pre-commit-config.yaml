@@ -12,7 +12,7 @@ repos:
         args:
           - --baseline
           - .secrets.baseline
-        exclude: ^(.agents/|.claude/|.cursor/|.windsurf/|skills-lock.json|.github/|infra/docker-compose.yml)
+        exclude: ^(.agents/|.claude/|.cursor/|.windsurf/|skills-lock.json|.github/|infra/docker-compose.yml|.*/tests/)
   - repo: https://github.com/commitizen-tools/commitizen
     rev: v4.0.0
     hooks:
