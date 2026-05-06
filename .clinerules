@@ -1,283 +1,60 @@
-# RiskCore — Project Rules for AI Agents (Cline / OpenCode)
+# RiskCore — Rules for Cline / OpenCode Agents
+
+> **This file is a lean reference.** Full rules, stack versions, and patterns are in `CLAUDE.md`.
+> If anything here conflicts with `CLAUDE.md`, `CLAUDE.md` wins.
+>
+> **SYNC WARNING**: When updating rules in `CLAUDE.md`, verify this file is still aligned.
+> Last synced with CLAUDE.md: 2026-05-06.
 
 ---
 
-## ⛔ ABSOLUTE RULE — Read before doing anything
+## First Steps — Every Session
 
-**NEVER run `git commit` or `git push` without explicit user confirmation.**
-
-- "Implement X" → NOT permission to commit
-- "Fix the bug" → NOT permission to commit
-- "Finish the task" → NOT permission to commit
-
-The only valid permission is the user explicitly saying: *"yes, commit"*, *"commit group 1"*, or similar.
-
-**Allowed without asking:** `git status`, `git diff`, `git log`, `git branch`, `git stash`
-**BLOCKED until explicit permission:** `git commit`, `git push`, `git merge`, `git rebase`, `git tag`
+1. Read `CONTEXT.md` — current state, active phase, plan, and rules
+2. Read `CLAUDE.md` — full project rules, stack, patterns, and conventions
+3. Check which service/area you are assigned to (CONTEXT.md Section 11)
 
 ---
 
-## Instruction priority
+## Critical Rules (always apply)
+
+1. **NEVER `git commit` or `git push` without explicit user confirmation**
+2. Read-only git OK without asking: `status`, `diff`, `log`, `branch`, `stash`
+3. Business logic ALWAYS in `services.py`, never in views
+4. Use `confluent-kafka`, never `kafka-python`
+5. Use `uv` for packages, never `pip install` or `requirements.txt`
+6. Use `Ruff` for linting, never `flake8` or `black`
+7. Use `pnpm` for frontend, never `npm` or `yarn`
+8. AuditEvent is append-only (regulatory) — never UPDATE or DELETE
+9. No database sharing between services
+10. Emails via Celery tasks, never in Kafka consumers directly
+11. Environment variables via `python-decouple`, never hardcoded
+12. Tests alongside the feature, never deferred to end of phase
+
+## Instruction Priority
 
 ```
-1. CONTEXT.md       ← ALWAYS read first (state + active rules)
-2. This file        ← project rules (ALWAYS applies)
-3. CLAUDE.md        ← full context and patterns
-4. docs/            ← reference (read when needed)
-5. .agents/skills/  ← generic patterns (project rules override if conflict)
+1. CONTEXT.md       <- state + active phase rules (ALWAYS first)
+2. CLAUDE.md        <- full project rules and patterns
+3. This file        <- quick reference for Cline/OpenCode
+4. docs/            <- detailed reference (read when needed)
+5. .agents/skills/  <- generic patterns (project rules override)
 ```
 
-**If a skill contradicts this file → this file wins.**
+## Architecture (quick reference)
 
-### When to read docs
-- `docs/API_DESIGN.md` → when creating endpoints
-- `docs/TECHNICAL_DECISIONS.md` → when you need to understand WHY
-- `docs/PHASES.md` → when checking what's left to do
-- `docs/GUIA_PROYECTO.md` → for business domain context
+| Service | Port | Role |
+|---|---|---|
+| policy-service | 8001 | Customers and policies |
+| claims-service | 8002 | Claims lifecycle |
+| notification-service | 8003 | Async email via Celery |
+| audit-service | 8004 | Immutable event log + WebSocket |
 
-### Skills (`.agents/skills/`) — important caveats
-- `django-expert` / `django-patterns`: useful BUT business logic ALWAYS in services.py (never views)
-- `test-driven-development`: useful for patterns BUT follow plan order (models → services → tests), not strict TDD
-- `next-best-practices`: only relevant during frontend work (Phase 7)
-- **When in doubt, follow THIS file and CLAUDE.md, not the skill**
+Communication: Kafka async by default. Only sync HTTP: claims -> policy (verify).
 
----
+## For Everything Else
 
-## Project Overview
-Insurance microservices backend portfolio project. 4 Django microservices + Next.js 15 dashboard + Kafka event-driven architecture.
-
-> 📍 **Read `CONTEXT.md` first** — it has the current project state, active phase, and next step.
-
-**Full context in `CLAUDE.md`** — read it first every session.
-- Business domain: `docs/GUIA_PROYECTO.md`
-- Technical decisions: `docs/TECHNICAL_DECISIONS.md`
-- API schemas: `docs/API_DESIGN.md`
-- Dev phases: `docs/PHASES.md`
-
----
-
-## Tech Stack — Exact Versions
-
-### Backend (per-service pyproject.toml)
-- Python 3.13, **uv (latest stable)** — package manager, replaces pip/virtualenv/pip-tools entirely
-- Django 5.2.x LTS, DRF 3.15.2
-- **confluent-kafka 2.6.x** — never use kafka-python
-- Celery 5.4.x + Redis 7.2.x
-- PostgreSQL 16.x — one DB per service, never shared
-- psycopg3 binary 3.3.x
-- structlog 25.x for JSON logs, django-prometheus 0.3.x for metrics
-- Django Channels 4.1.x + channels-redis 4.2.x
-- **Ruff 0.15.x** — linting + formatting, replaces flake8/black/isort entirely
-- mypy 1.20.x + django-stubs 6.0.x
-- pytest 9.x + pytest-django 4.12.x + factory-boy
-
-### Frontend
-- Next.js 15.5.9 App Router, React 19, TypeScript 5.9.x
-- **pnpm 10.24.0** — never npm or yarn
-- Tailwind CSS 4.x, Radix UI, Zustand 5.x, Zod 4.x
-- Vitest 4.x + Playwright 1.58.x
-
----
-
-## Architecture
-
-### Services & Ports
-- policy-service:8001 → customers and policies
-- claims-service:8002 → claims lifecycle
-- notification-service:8003 → async email via Celery
-- audit-service:8004 → immutable event log
-
-### Communication Rules
-- Default: async via Kafka topics (`policy.*`, `claim.*`)
-- Only sync HTTP: claims-service → policy-service (verify policy before creating claim)
-- Zero database sharing between services
-- No new sync HTTP endpoints between services — use Kafka
-
-### Service Internal Structure
-```
-apps/core/             # health, exceptions, pagination, middleware
-apps/[domain]/
-  models.py            # ORM only — no logic
-  serializers.py       # DRF schemas
-  views.py             # Thin — call service, return response
-  services.py          # ALL business logic here
-  events.py            # Kafka producers
-  consumers.py         # Kafka consumers (management command)
-  tasks.py             # Celery tasks (notification-service only)
-  clients.py           # HTTP client (claims-service only)
-  tests/               # test_models.py, test_services.py, test_views.py
-```
-
----
-
-## Mandatory Patterns
-
-### views.py must be thin — logic goes in services.py
-```python
-# CORRECT
-def cancel(self, request, pk):
-    policy = get_object_or_404(Policy, pk=pk)
-    result = PolicyService().cancel_policy(policy, reason=request.data.get("reason"))
-    return Response(PolicySerializer(result).data)
-```
-
-### Kafka event schema — always this envelope
-```python
-{
-    "event_id": str(uuid.uuid4()),
-    "event_type": "policy.created",
-    "occurred_at": timezone.now().isoformat(),
-    "service": "policy-service",
-    "data": { ... }
-}
-```
-
-### HTTP inter-service — always httpx with 5s timeout
-```python
-async with httpx.AsyncClient(timeout=5.0) as client:
-    response = await client.get(f"{POLICY_SERVICE_URL}/verify/")
-# timeout → 503 response, invalid policy → 400 response
-```
-
-### Structured logs — request_id injected by middleware automatically
-```python
-# In HTTP views: middleware binds request_id via structlog.contextvars — do NOT pass manually
-logger.info("policy_created", policy_id=str(policy.id), customer_id=str(policy.customer_id))
-
-# In Celery tasks / Kafka consumers (no HTTP context): bind manually
-logger.info("email_sent", notification_id=notification_id, request_id=task_request_id)
-```
-
-### Error format — same across all services
-```json
-{"error": {"code": "ERROR_CODE", "message": "Business language.", "details": {}}, "request_id": "uuid"}
-```
-
-### Settings split by environment
-```
-config/settings/base.py   development.py   production.py   test.py
-```
-Environment variables always via `python-decouple`. Never hardcode.
-
----
-
-## Business Rules
-
-### Claims State Machine
-```
-FILED → UNDER_REVIEW → APPROVED → RESOLVED
-                    └→ REJECTED → RESOLVED
-```
-- Only service.py changes state, never a direct PATCH on status field
-- Each transition saves ClaimStatusHistory record
-- Each transition emits Kafka claim.status_changed event
-- Invalid transitions return 400 with valid options listed
-
-### AuditEvent — Append Only (regulatory requirement)
-Never update or delete AuditEvent records. Only INSERT.
-audit-service has no UpdateAPIView or DestroyAPIView.
-
-### Policy Verification Before Claim Creation
-claims-service MUST call policy-service /verify/ endpoint before creating any Claim.
-Cancelled, expired, or nonexistent policy → 400 error, claim not created.
-
----
-
-## Testing
-
-### Mock in unit tests
-- confluent_kafka.Producer
-- httpx.AsyncClient (inter-service calls)
-- django.core.mail
-
-### Do NOT mock in integration tests
-- PostgreSQL (use real DB with @pytest.mark.django_db)
-- Redis (use real Redis for Channels/Celery tests)
-
-### Coverage: services.py 90%+, views.py 80%+, consumers.py 80%+
-Write tests alongside the feature, not after the phase is done.
-
----
-
-## Git — Workflow and Rules
-
-### CRITICAL: Never commit or push without explicit user permission
-Before any `git commit` or `git push`, always ask the user and wait for confirmation.
-"Implement X" does NOT include permission to commit.
-Read-only (always OK): `git status`, `git diff`, `git log`, `git branch`
-
-### Branches
-```
-main                ← production, protected — no direct commits ever
-dev                 ← integration — receives PRs from feat branches
-feat/phase-N-name   ← one branch per development phase
-```
-
-### Conventional commits (required)
-```
-feat(policy): add cancellation endpoint
-fix(claims): validate policy status before filing
-chore(infra): add kafka topic creation script
-test(audit): add consumer integration tests
-docs(api): update claims endpoint schemas
-```
-Valid scopes: `policy`, `claims`, `notifications`, `audit`, `infra`, `frontend`, `gateway`, `api`
-
-### Commit grouping — one logical change per commit
-Group related changes together. Never mix unrelated files in one commit.
-
-### Pull Request format — always follow this
-
-**Title** — max 72 chars:
-```
-[Phase N] scope: imperative summary
-```
-Examples:
-```
-[Phase 1] policy-service: models, API, Kafka events, tests
-[Phase 2] claims-service: state machine, inter-service verify
-[Phase 3] consumers: audit append-only, notifications via Celery
-```
-
-**Description** — always this structure:
-```markdown
-## ¿Qué incluye este PR?
-- Bullet per logical module (models, services, views, events, tests…)
-
-## Decisiones técnicas destacadas
-- One line per non-obvious decision (pattern chosen, tradeoff, workaround)
-
-## Tests
-- Number of tests added and coverage reached
-- Which critical scenarios are covered
-
-## Cómo verificar
-- Concrete commands to test key endpoints or behavior
-
-🤖 Co-developed with Claude Code + OpenCode
-```
-
-Rules:
-- Scope = service or area name (`policy-service`, `claims-service`, `infra`, `frontend`)
-- Imperative verb, no trailing period
-- Never include issue/ticket numbers (no external tracker)
-- PR goes `feat/phase-N` → `dev`, never directly to `main`
-- Agent never opens or merges a PR without explicit user confirmation
-
----
-
-## Absolute Rules — Never Break
-
-1. **Never commit/push without explicit user permission** — always ask first
-2. Never commit directly to main or dev — always use feat branches
-3. No shared databases between services (Database per Service pattern)
-4. No business logic in views.py — always in services.py
-5. Use confluent-kafka, never kafka-python
-6. No hardcoded secrets — always python-decouple
-7. AuditEvent is append-only, never modify or delete
-8. No new inter-service HTTP calls — use Kafka
-9. Kafka consumers delegate slow work to Celery tasks
-10. Rate limiting in Nginx, not Django
-11. Use Ruff for linting/formatting, not flake8/black
-12. Use pnpm in frontend, never npm/yarn
-13. Use uv for Python package management, never pip install or requirements.txt
+- Stack versions, Kafka topics, error format, event schema, git conventions, PR format, testing patterns, business rules, service structure -> see `CLAUDE.md`
+- Phase checklists and entregables -> see `docs/PHASES.md`
+- API schemas -> see `docs/API_DESIGN.md`
+- Domain context -> see `docs/GUIA_PROYECTO.md`

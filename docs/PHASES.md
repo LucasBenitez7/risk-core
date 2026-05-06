@@ -11,12 +11,12 @@
 |---|---|---|---|
 | 0 | Setup e Infraestructura | 1 días | `feat/phase-0-setup` | ✅ Completado |
 | 1 | policy-service | 1.5 días | `feat/phase-1-policy-service` | ✅ Completado |
-| 2 | claims-service | 1.5 días | `feat/phase-2-claims-service` | ⏳ En curso |
-| 3 | audit-service + notification-service | 1 día | `feat/phase-3-consumers` |
-| 4 | Observabilidad | 1 día | `feat/phase-4-observability` |
-| 5 | Gateway + Rate Limiting | 0.5 día | `feat/phase-5-gateway` |
-| 6 | Load Testing | 0.5 día | `feat/phase-6-load-testing` |
-| 7 | Frontend Dashboard | 1 día | `feat/phase-7-frontend` |
+| 2 | claims-service | 1.5 días | `feat/phase-2-claims-service` | ✅ Completado |
+| 3 | audit-service + notification-service | 1 día | `feat/phase-3-consumers` | ⏳ En curso |
+| 4 | Observabilidad | 1 día | `feat/phase-4-observability` | ❌ No iniciado |
+| 5 | Gateway + Rate Limiting | 0.5 día | `feat/phase-5-gateway` | ❌ No iniciado |
+| 6 | Load Testing | 0.5 día | `feat/phase-6-load-testing` | ❌ No iniciado |
+| 7 | Frontend Dashboard | 1 día | `feat/phase-7-frontend` | ❌ No iniciado |
 
 **Total estimado**: ~8 días trabajando en paralelo con la búsqueda de empleo.
 
