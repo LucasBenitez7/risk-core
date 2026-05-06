@@ -232,6 +232,44 @@ feat(policy): add CustomerViewSet with CRUD endpoints
 test(policy): add unit tests for PolicyService
 ```
 
+### Pull Request format — always follow this
+
+**Title** — max 72 chars:
+```
+[Phase N] scope: imperative summary
+```
+Examples:
+```
+[Phase 1] policy-service: models, API, Kafka events, tests
+[Phase 2] claims-service: state machine, inter-service verify
+[Phase 3] consumers: audit append-only, notifications via Celery
+```
+
+**Description** — always this structure:
+```markdown
+## ¿Qué incluye este PR?
+- Bullet per logical module (models, services, views, events, tests…)
+
+## Decisiones técnicas destacadas
+- One line per non-obvious decision (pattern chosen, tradeoff, workaround)
+
+## Tests
+- Number of tests added and coverage reached
+- Which critical scenarios are covered
+
+## Cómo verificar
+- Concrete commands to test key endpoints or behavior
+
+🤖 Co-developed with Claude Code + OpenCode
+```
+
+Rules:
+- Scope = service or area name (`policy-service`, `claims-service`, `infra`, `frontend`)
+- Imperative verb, no trailing period
+- Never include issue/ticket numbers (no external tracker)
+- PR goes `feat/phase-N` → `dev`, never directly to `main`
+- Agent never opens or merges a PR without explicit user confirmation
+
 ---
 
 ## NEVER Do This

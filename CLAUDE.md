@@ -552,6 +552,44 @@ El agente nunca abre ni mergea un PR sin confirmación del usuario.
 
 Usar `/commit-ready` para preparar commits agrupados antes de pedir permiso.
 
+#### Formato obligatorio de título y descripción de PR
+
+**Título** — máximo 72 caracteres, formato:
+```
+[Phase N] Scope: resumen en imperativo
+```
+Ejemplos:
+```
+[Phase 1] policy-service: models, API, Kafka events, tests
+[Phase 2] claims-service: state machine, inter-service verify
+[Phase 3] consumers: audit append-only, notifications via Celery
+```
+
+**Descripción** — siempre esta estructura, adaptada al contenido real:
+
+```markdown
+## ¿Qué incluye este PR?
+- Bullet por módulo o área lógica (models, services, views, events, tests...)
+
+## Decisiones técnicas destacadas
+- Una línea por decisión no obvia (patrón elegido, tradeoff, workaround)
+
+## Tests
+- Número de tests añadidos y cobertura alcanzada
+- Qué escenarios críticos cubre
+
+## Cómo verificar
+- Comandos concretos para probar los endpoints o comportamiento clave
+
+🤖 Co-developed with Claude Code + OpenCode
+```
+
+Reglas del título:
+- Scope = nombre del servicio o área (`policy-service`, `claims-service`, `infra`, `frontend`)
+- Imperativo en inglés o español — consistente dentro del proyecto
+- Sin punto final
+- No incluir número de issue ni ticket (no hay tracker externo)
+
 ---
 
 ## Comandos de Desarrollo
