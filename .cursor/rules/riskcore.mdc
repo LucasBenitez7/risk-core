@@ -5,6 +5,47 @@ alwaysApply: true
 
 # RiskCore — Project Rules
 
+---
+
+## ⛔ ABSOLUTE RULE — Read before doing anything
+
+**NEVER run `git commit` or `git push` without explicit user confirmation.**
+
+- "Implement X" → NOT permission to commit
+- "Fix the bug" → NOT permission to commit
+- "Finish the task" → NOT permission to commit
+
+The only valid permission is the user explicitly saying: *"yes, commit"*, *"commit group 1"*, or similar.
+
+**Allowed without asking:** `git status`, `git diff`, `git log`, `git branch`, `git stash`
+**BLOCKED until explicit permission:** `git commit`, `git push`, `git merge`, `git rebase`, `git tag`
+
+---
+
+## Instruction priority
+
+```
+1. CONTEXT.md       ← ALWAYS read first (state + active rules)
+2. This file        ← project rules (ALWAYS applies)
+3. docs/            ← reference (read when needed)
+4. .agents/skills/  ← generic patterns (project rules override if conflict)
+```
+
+**If a skill contradicts this file → this file wins.**
+
+### When to read docs
+- `docs/API_DESIGN.md` → when creating endpoints (exact request/response schemas)
+- `docs/TECHNICAL_DECISIONS.md` → when you need to understand WHY
+- `docs/PHASES.md` → when checking what's left to do
+- `docs/GUIA_PROYECTO.md` → when you need business domain context
+
+### Skills (`.agents/skills/`) — caution
+- `django-expert` / `django-patterns`: useful for ORM patterns, BUT business logic ALWAYS goes in services.py (not views) regardless of what the skill suggests
+- `test-driven-development`: useful for test patterns, BUT follow the plan order (models → services → tests), not strict TDD
+- `next-best-practices`: only for Phase 7 (frontend)
+
+---
+
 ## What is this project
 Insurance microservices backend. 4 Django microservices + Next.js 15 dashboard + Kafka event-driven architecture.
 

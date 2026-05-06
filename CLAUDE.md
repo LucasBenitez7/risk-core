@@ -7,6 +7,77 @@
 
 ---
 
+## ⛔ REGLA ABSOLUTA — Leer antes de hacer cualquier cosa
+
+**NUNCA ejecutar `git commit` ni `git push` sin confirmación explícita del usuario.**
+
+- "Implementa X" → NO es permiso para commitear
+- "Arregla el bug" → NO es permiso para commitear
+- "Termina la tarea" → NO es permiso para commitear
+
+El único permiso válido es que el usuario diga explícitamente: *"sí, commitea"*, *"commitea el grupo 1"*, o similar.
+
+**Flujo correcto:**
+1. Agente implementa
+2. Agente avisa que terminó y espera instrucción
+3. Usuario pide `/commit-ready`
+4. Agente propone mensajes agrupados
+5. Usuario confirma cada grupo → agente ejecuta
+
+**Comandos git permitidos sin pedir permiso:** `git status`, `git diff`, `git log`, `git branch`, `git stash`
+**Comandos git BLOQUEADOS hasta permiso explícito:** `git commit`, `git push`, `git merge`, `git rebase`, `git tag`
+
+---
+
+---
+
+## Jerarquía de instrucciones — Qué gana sobre qué
+
+```
+1. CONTEXT.md          ← estado actual + reglas de la fase (SIEMPRE leer primero)
+2. Este archivo         ← reglas del proyecto (SIEMPRE aplica)
+3. docs/               ← referencia detallada (leer cuando se necesite)
+4. .agents/skills/     ← patrones genéricos (útil, pero el proyecto manda si hay conflicto)
+```
+
+**Si un skill contradice una regla de este archivo → este archivo gana.**
+
+### Cuándo leer cada recurso
+
+| Recurso | Cuándo leerlo |
+|---|---|
+| `CONTEXT.md` | **Siempre al inicio de cada sesión** — estado, fase, reglas activas |
+| `docs/PHASES.md` | Cuando `/next-step` o `/phase-checklist` lo indiquen |
+| `docs/API_DESIGN.md` | Al crear endpoints — tiene los schemas request/response exactos |
+| `docs/TECHNICAL_DECISIONS.md` | Si necesitas entender POR QUÉ se hizo algo así |
+| `docs/GUIA_PROYECTO.md` | Para entender el dominio de negocio (pólizas, siniestros) |
+| `docs/PLAN_COMPLETO.md` | Para ver la estructura completa y módulos planificados |
+
+### Cuándo usar cada skill (`.agents/skills/`)
+
+| Skill | Cuándo se activa | ⚠️ Cuidado |
+|---|---|---|
+| `django-expert` | Crear modelos, views, serializers, queries ORM | Puede sugerir fat views — ignorar, lógica siempre en services.py |
+| `django-patterns` | Estructura de proyecto, middleware, signals | La estructura del proyecto ya está definida aquí — no cambiarla |
+| `test-driven-development` | Escribir tests | Útil para patrones, pero el orden del plan manda (no TDD estricto) |
+| `code-review-excellence` | Revisar código antes de PR | Usar para revisión final, no durante implementación |
+| `next-best-practices` | Trabajo en frontend Next.js (solo Fase 7) | Solo App Router, nunca Pages Router |
+| `webapp-testing` | Tests E2E con Playwright (solo Fase 7) | — |
+
+### Slash commands (`.claude/commands/`)
+
+Solo se activan cuando el usuario los invoca con `/nombre`. El agente nunca los ejecuta por su cuenta.
+
+| Comando | Cuándo el usuario lo usará |
+|---|---|
+| `/commit-ready` | Cuando quiera preparar commits (después de terminar una tarea) |
+| `/next-step` | Cuando quiera saber qué implementar ahora |
+| `/phase-checklist` | Cuando quiera ver el progreso de la fase |
+| `/new-endpoint` | Cuando pida crear un endpoint nuevo desde cero |
+| `/write-tests` | Cuando pida tests para un módulo específico |
+
+---
+
 ## Qué es este proyecto
 
 **RiskCore** es un sistema backend de microservicios que simula el core de una aseguradora enterprise. Proyecto de portfolio orientado a sistemas distribuidos.
