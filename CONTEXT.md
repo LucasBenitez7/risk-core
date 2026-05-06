@@ -8,19 +8,19 @@
 
 ## Estado actual
 
-**Fase**: 0 — Setup e Infraestructura  
-**Rama activa**: `feat/phase-0-setup`  
-**Última tarea completada**: Git init, primer commit, ramas (main/dev/feat/phase-0-setup), .gitignore, COMANDOS.md  
-**Próximo paso**: Crear `.pre-commit-config.yaml` y estructura de carpetas del monorepo  
+**Fase**: 1 — policy-service  
+**Rama activa**: `feat/phase-1-policy-service`  
+**Última tarea completada**: Fase 0 mergeada — monorepo, 4 Django services, Docker Compose, Kafka, pre-commit, CI verdes  
+**Próximo paso**: Customer model + API endpoint (list, create, retrieve)  
 
 ---
 
 ## Progreso por fase
 
 | Fase | Nombre | Estado |
-|---|---|---|
-| 0 | Setup e Infraestructura | ⏳ En curso |
-| 1 | policy-service | ❌ No iniciado |
+|---|---|---|---|
+| 0 | Setup e Infraestructura | ✅ Completado |
+| 1 | policy-service | ⏳ En curso |
 | 2 | claims-service | ❌ No iniciado |
 | 3 | audit-service + notification-service | ❌ No iniciado |
 | 4 | Observabilidad | ❌ No iniciado |
@@ -36,15 +36,16 @@
 - ✅ Instrucciones para agentes (CLAUDE.md, .cursor/rules, .clinerules)
 - ✅ Slash commands (`.claude/commands/`)
 - ✅ Skills instalados (`.agents/skills/`)
-- ✅ Git init, ramas (main, dev, feat/phase-0-setup)
-- ✅ `.gitignore`
-- ✅ `COMANDOS.md`
-- ✅ Primer commit (`chore(infra): initial project setup with documentation and agent configs`)
-- ❌ `.pre-commit-config.yaml`
-- ❌ Código del proyecto (no iniciado aún)
-- ❌ Docker Compose / infraestructura
-- ❌ Servicios Django
-- ❌ Frontend
+- ✅ Git workflow (main, dev, feat branches)
+- ✅ `.gitignore` + `.pre-commit-config.yaml` (ruff, detect-secrets, commitizen)
+- ✅ `.secrets.baseline`
+- ✅ `COMANDOS.md` + `Makefile` + `README.md`
+- ✅ Docker Compose (PostgreSQL 16, Redis 7.2, Kafka 3.7 KRaft)
+- ✅ Kafka 6 topics creados
+- ✅ 4 Django 5.2 service esqueletos con health `/health/` respondiendo
+- ✅ CI workflows (5) pasando en verde
+- ✅ PR Phase 0 mergeado a dev
+- ❌ Modelos y endpoints de policy-service (en curso)
 
 ---
 
