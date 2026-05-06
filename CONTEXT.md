@@ -16,7 +16,7 @@ Permitido sin pedir permiso: `git status`, `git diff`, `git log`, `git branch`, 
 
 ---
 
-## ⚠️ Reglas críticas para la fase actual
+## ⚠️ Reglas críticas para la fase actual — Fase 2 (claims-service)
 
 > Estas reglas cambian según la fase. Actualizarlas al cambiar de fase.
 
@@ -26,24 +26,66 @@ Permitido sin pedir permiso: `git status`, `git diff`, `git log`, `git branch`, 
 
 3. **Formato de error estándar siempre**: `{"error": {"code": "UPPERCASE_CODE", "message": "lenguaje de negocio", "details": {}}, "request_id": "uuid"}`. Nunca devolver `{"detail": "..."}` ni `{"error": "texto plano"}`.
 
-4. **No crear llamadas HTTP entre servicios** salvo claims→policy `/verify/`. Si necesitas datos de otro servicio, es via Kafka event (async). No añadir nuevos endpoints "internos".
+4. **La máquina de estados SOLO en `ClaimService.transition_status()`**. Nunca un PATCH directo al campo `status`. Toda transición debe guardar `ClaimStatusHistory` y emitir el evento Kafka correspondiente.
+
+5. **HTTP inter-service SOLO para verificar póliza**. `PolicyServiceClient.verify_policy()` es la única llamada HTTP entre servicios. Timeout 5s → 503. Póliza inactiva → 400. No añadir más llamadas HTTP.
+
+6. **Kafka producer se llama DESPUÉS del bloque `transaction.atomic()`**, nunca dentro. Si el DB falla, el evento no se emite.
 
 ---
 
 ## Estado actual
 
-**Fase**: 1 — policy-service  
-**Rama activa**: `feat/phase-1-policy-service`  
-**Última tarea completada**: Claude Code — Auditoría Fase 1 completa: fix mock Kafka en test_services.py + factories corregidas en conftest.py  
-**Próximo paso**: Fase 1 COMPLETA y auditada. Ejecutar `/commit-ready` para preparar commits antes del PR.  
+**Fase**: 2 — claims-service  
+**Rama activa**: `feat/phase-2-claims-service`  
+**Última tarea completada**: Paso 6 — Tests (OpenCode) ✅ — 39 tests, 96% services.py, 100% views.py  
+**Próximo paso**: **FASE 2 COMPLETA.** Ejecutar verificación final y preparar commits.
 
 ---
 
-## Plan detallado — Fase 1 (policy-service)
+## Plan detallado — Fase 2 (claims-service)
 
 > Este plan es editable por cualquier agente. Marcar `[x]` al completar cada paso.  
-> Rama: `feat/phase-1-policy-service` | Scope commits: `policy`  
+> Rama: `feat/phase-2-claims-service` | Scope commits: `claims`  
 > **Dos agentes trabajan en paralelo — ver tabla de división más abajo.**
+
+---
+
+### Contexto de dominio — leer antes de empezar
+
+**Máquina de estados de Claim** (inmutable — no modificar):
+```
+FILED → UNDER_REVIEW → APPROVED  → RESOLVED
+                    └→ REJECTED  → RESOLVED
+```
+```python
+VALID_TRANSITIONS = {
+    "FILED":        ["UNDER_REVIEW"],
+    "UNDER_REVIEW": ["APPROVED", "REJECTED"],
+    "APPROVED":     ["RESOLVED"],
+    "REJECTED":     ["RESOLVED"],
+    "RESOLVED":     [],
+}
+```
+- Transición a APPROVED requiere `approved_amount`
+- Transición a REJECTED requiere `notes`
+- Toda transición guarda `ClaimStatusHistory` y emite Kafka event
+
+**Verificación de póliza antes de crear Claim** (única llamada HTTP inter-service):
+```python
+# claims-service/apps/claims/clients.py
+async with httpx.AsyncClient(timeout=5.0) as client:
+    response = await client.get(f"{POLICY_SERVICE_URL}/api/policies/policies/{policy_id}/verify/")
+# timeout → lanzar PolicyServiceUnavailableError → view devuelve 503
+# is_valid=False → lanzar PolicyInactiveError → view devuelve 400
+```
+
+**Eventos Kafka que emite claims-service**:
+- `claim.filed` — al crear un Claim con status FILED
+- `claim.status_changed` — en cada transición de estado
+- `claim.resolved` — cuando status llega a RESOLVED (además de `claim.status_changed`)
+
+---
 
 ### 🤖 Protocolo de avance automático entre rondas
 
@@ -58,57 +100,62 @@ Permitido sin pedir permiso: `git status`, `git diff`, `git log`, `git branch`, 
 ### 🔵 RONDA 1 — Paralelo (ambos agentes a la vez)
 
 #### Paso 0 — core/ setup `[CLAUDE CODE]` ✅
-> Prerrequisito para todos los demás pasos. Sin esto, views y serializers no tienen exception handler ni middleware.
+> Prerrequisito: las excepciones de dominio deben existir antes de que services.py las use.
 
-- [x] `apps/core/exceptions.py` — `custom_exception_handler` + excepciones de dominio:
-  - `PolicyNotFoundError`, `InvalidPolicyStatusError`, `CustomerNotFoundError`
-  - Formato estándar: `{"error": {"code": "...", "message": "...", "details": {}}, "request_id": "uuid"}`
-- [x] `apps/core/middleware.py` — `RequestIDMiddleware`:
-  - Lee `X-Request-ID` del header o genera UUID nuevo
-  - Llama `structlog.contextvars.bind_contextvars(request_id=request_id)`
-  - Agrega `X-Request-ID` al response
-- [x] `apps/core/pagination.py` — `StandardPagination` (PageNumber, page_size=20, max=100)
-- [x] `apps/core/views.py` — `HealthCheckView` (ya existe en el esqueleto — verificar que está OK)
-- [x] Registrar middleware en `config/settings/base.py`
-- [x] Registrar `custom_exception_handler` en `REST_FRAMEWORK` settings
+- [x] `apps/core/exceptions.py` — `custom_exception_handler` con field-level ValidationError + 4 excepciones de dominio añadidas
+- [x] `apps/core/middleware.py` — `RequestIDMiddleware` OK (existía en esqueleto)
+- [x] `apps/core/pagination.py` — `StandardPagination` OK (existía en esqueleto)
+- [x] `apps/core/views.py` — `HealthCheckView` OK (existía en esqueleto)
+- [x] `config/settings/base.py` — `RequestIDMiddleware` + `custom_exception_handler` ya registrados; `apps.claims` en INSTALLED_APPS
+- [x] `POLICY_SERVICE_URL` y `POLICY_SERVICE_TIMEOUT` ya configurados via `python-decouple`
 
 #### Paso 1 — Models + Migrations `[OPENCODE]` ✅
 > No depende de core/. Se puede hacer en paralelo con Paso 0.
 
-- [x] `apps/policies/models.py` — cuatro modelos:
-  - `Customer`: `id` (UUID PK), `full_name`, `email` (único), `dni` (único), `phone`, `address`, `created_at`, `updated_at`
-  - `Policy`: `id` (UUID PK), `policy_number` (POL-YYYY-NNNNNN, auto-gen, único), `customer` (FK), `policy_type` (LIFE/HEALTH/AUTO/HOME/BUSINESS), `status` (ACTIVE/SUSPENDED/CANCELLED/EXPIRED), `premium_amount` (Decimal), `start_date`, `end_date`, `description`, `cancellation_reason`, `created_at`, `updated_at`
-  - `Coverage`: `id` (UUID PK), `policy` (FK), `coverage_type`, `coverage_amount` (Decimal), `description`
-  - `PolicyDocument`: `id` (UUID PK), `policy` (FK), `document_type`, `file_url`, `uploaded_at`
-  - Índices: `Policy.status`, `Policy.customer`, `Policy.policy_number`, `Policy.end_date`
-  - [x] `generate_policy_number()` — formato POL-YYYY-NNNNNN con padding cero, auto-generado en `save()`
+- [x] `apps/claims/models.py` — tres modelos:
+  - `Claim`: `id` (UUID PK), `claim_number` (CLM-YYYY-NNNNNN, auto-gen, único), `policy_id` (UUID — NO FK real, referencia externa), `claimant_name`, `claimant_email`, `incident_date` (DateField), `incident_type` (choices: ACCIDENTE/ROBO/INCENDIO/INUNDACION/OTRO), `description`, `estimated_damage` (Decimal 12,2), `approved_amount` (Decimal 12,2, null/blank), `location` (blank), `status` (choices FILED/UNDER_REVIEW/APPROVED/REJECTED/RESOLVED, default FILED), `filed_at` (auto_now_add), `updated_at` (auto_now)
+  - `ClaimStatusHistory`: `id` (UUID PK), `claim` (FK → Claim, CASCADE), `from_status` (blank — null para el primer registro), `to_status`, `changed_at` (auto_now_add), `notes` (blank)
+  - `ClaimDocument`: `id` (UUID PK), `claim` (FK → Claim, CASCADE), `document_type`, `file_url` (URLField max 500), `uploaded_at` (auto_now_add)
+  - Índices en `Claim`: `status`, `policy_id`, `filed_at`, `incident_type`
+  - `generate_claim_number()` — formato CLM-YYYY-NNNNNN, igual que `generate_policy_number()` en policy-service, usando `select_for_update()` dentro del `transaction.atomic()` del service
 - [x] Migraciones: `uv run python manage.py makemigrations` + `migrate` — sin errores
+- [x] Registrar `apps.claims` en `INSTALLED_APPS` en `config/settings/base.py`
 
 ---
 
 ### 🔵 RONDA 2 — Paralelo (después de que Ronda 1 esté completa)
 
 #### Paso 2 — Serializers `[CLAUDE CODE]` ✅
-> Requiere modelos (Paso 1). Usar excepciones de core/ (Paso 0).
-
-- [x] `apps/policies/serializers.py`:
-  - `CustomerSerializer` — todos los campos, validar `email` único (excluir instancia actual en update), validar `dni` único
-  - `CoverageSerializer` — campos de Coverage
-  - `PolicyDocumentSerializer` — campos de PolicyDocument
-  - `PolicySerializer` — con `coverages` nested (read-only), `customer_id` para write, validar `premium_amount > 0`, validar `start_date < end_date`
-  - `PolicyVerifySerializer` — respuesta de `/verify/`: `{"policy_id", "status", "is_valid", "customer_id"}`
-  - `PolicyCancelSerializer` — input de `/cancel/`: `{"reason"}` (requerido)
-
-#### Paso 3 — Services (lógica de negocio) `[OPENCODE]` ✅
 > Requiere modelos (Paso 1) y excepciones de core/ (Paso 0).
 
-- [x] `apps/policies/services.py` — clase `PolicyService`:
-  - `create_policy(data: dict) → Policy` — valida customer existe, crea Policy + Coverages en transacción atómica
-  - `cancel_policy(policy: Policy, reason: str) → Policy` — solo si ACTIVE o SUSPENDED; si ya CANCELLED/EXPIRED → lanza `InvalidPolicyStatusError`; guarda `cancellation_reason`
-  - `update_policy(policy: Policy, data: dict) → Policy` — solo si no está CANCELLED ni EXPIRED; actualiza campos permitidos
-  - `verify_policy(policy_id: UUID) → dict` — retorna `{"policy_id", "status", "is_valid": status=="ACTIVE", "customer_id"}`
-  - `get_policies_queryset(filters: dict) → QuerySet` — aplica filtros: status, policy_type, customer_id, start_date_from, start_date_to
-  - Cada método usa `select_for_update()` donde hay riesgo de concurrencia
+- [x] `apps/claims/serializers.py`:
+  - `ClaimStatusHistorySerializer` — campos: `from_status`, `to_status`, `changed_at`, `notes` (read-only)
+  - `ClaimDocumentSerializer` — campos: `id`, `document_type`, `file_url`, `uploaded_at` (read-only)
+  - `ClaimSerializer` — campos: todos los de Claim + `status_history` nested (read-only) + `documents` nested (read-only). Write: `policy_id`, `claimant_name`, `claimant_email`, `incident_date`, `incident_type`, `description`, `estimated_damage`, `location`. Read-only: `id`, `claim_number`, `status`, `approved_amount`, `filed_at`, `updated_at`. Validar: `incident_date` no puede ser futura
+  - `ClaimTransitionSerializer` — input de `/transition/`: `new_status` (requerido), `notes` (blank), `approved_amount` (Decimal, requerido solo si `new_status=APPROVED`)
+  - `ClaimListSerializer` — versión ligera para listados (sin `status_history` ni `documents`)
+
+#### Paso 3 — Services + Client HTTP `[OPENCODE]` ✅
+> Requiere modelos (Paso 1) y excepciones de core/ (Paso 0).
+
+- [x] `apps/claims/clients.py` — clase `PolicyServiceClient`:
+  - `verify_policy(policy_id: str) → dict` — llama `GET {POLICY_SERVICE_URL}/api/policies/policies/{policy_id}/verify/`
+  - Timeout: `POLICY_SERVICE_TIMEOUT` segundos (default 5)
+  - `httpx.TimeoutException` o `httpx.ConnectError` → lanza `PolicyServiceUnavailableError`
+  - Respuesta con `is_valid=False` → lanza `PolicyInactiveError(policy_id, policy_status)`
+  - Respuesta 404 → lanza `PolicyInactiveError`
+  - **Usar `httpx` síncrono** (`httpx.Client`, no async) — Django views son síncronas
+- [x] `apps/claims/services.py` — clase `ClaimService`:
+  - `file_claim(data: dict) → Claim`:
+    1. Llama `PolicyServiceClient().verify_policy(data["policy_id"])` — puede lanzar excepciones
+    2. Dentro de `transaction.atomic()`: crea `Claim` + primer `ClaimStatusHistory(from_status=None, to_status="FILED", notes="Siniestro reportado")`
+    3. Fuera del atomic: llama `ClaimEventProducer().produce_claim_filed(claim)`
+  - `transition_status(claim: Claim, new_status: str, notes: str = "", approved_amount=None) → Claim`:
+    1. Valida que `new_status` es una transición válida desde `claim.status` (usando `VALID_TRANSITIONS`) → si no, lanza `InvalidClaimStatusError`
+    2. Si `new_status == "APPROVED"` y `approved_amount` es None → lanza `ValidationError`
+    3. Dentro de `transaction.atomic()` con `select_for_update()`: actualiza `claim.status` + `claim.approved_amount` si aplica + guarda `ClaimStatusHistory`
+    4. Fuera del atomic: emite `claim.status_changed` siempre + `claim.resolved` adicional si `new_status == "RESOLVED"`
+  - `get_claims_queryset(*, status, policy_id, incident_type) → QuerySet` — filtros opcionales
 
 ---
 
@@ -117,79 +164,111 @@ Permitido sin pedir permiso: `git status`, `git diff`, `git log`, `git branch`, 
 #### Paso 4 — Views + URLs + Admin `[CLAUDE CODE]` ✅
 > Requiere serializers (Paso 2) y services (Paso 3).
 
-- [x] `apps/policies/views.py`:
-  - `CustomerViewSet(ModelViewSet)` — solo `list`, `create`, `retrieve` (sin update/delete). Usa `StandardPagination`.
-  - `PolicyViewSet(ModelViewSet)` — `list`, `create`, `retrieve`, `partial_update` + acciones custom:
-    - `@action POST /policies/{id}/cancel/` → llama `PolicyService().cancel_policy()`
-    - `@action GET /policies/{id}/verify/` → llama `PolicyService().verify_policy()` (sin auth, para claims-service)
-  - Filtros en `list`: `?status=`, `?policy_type=`, `?customer_id=`, `?start_date_from=`, `?start_date_to=`
+- [x] `apps/claims/views.py`:
+  - `ClaimViewSet` — `list`, `create`, `retrieve` + acción custom:
+    - `@action POST /claims/{id}/transition/` → llama `ClaimService().transition_status()`
+  - `get_serializer_class()`: usar `ClaimListSerializer` en `list`, `ClaimSerializer` en el resto
+  - `get_queryset()`: llama `ClaimService().get_claims_queryset()` con query params (`?status=`, `?policy_id=`, `?incident_type=`)
   - Views thin: sin lógica de negocio, sin queries directas
-- [x] `apps/policies/urls.py` — `DefaultRouter`, registrar ambos ViewSets. Prefijos: `customers/`, `policies/`
-- [x] `config/urls.py` — ya incluido desde Fase 0
-- [x] `apps/policies/admin.py` — django-unfold: `CustomerAdmin` (list: full_name, email, dni, created_at; search: full_name, email, dni), `PolicyAdmin` (list: policy_number, customer, policy_type, status, premium_amount; filters: status, policy_type; search: policy_number, customer__full_name)
+- [x] `apps/claims/urls.py` — `DefaultRouter`, prefijo `claims/`
+- [x] `config/urls.py` — incluir `apps.claims.urls` con `api/claims/`
+- [x] `apps/claims/admin.py` — django-unfold:
+  - `ClaimAdmin`: list: `claim_number`, `policy_id`, `claimant_name`, `status`, `incident_type`, `filed_at`; filters: `status`, `incident_type`; search: `claim_number`, `claimant_name`, `policy_id`; inline `ClaimStatusHistoryInline` (read-only)
 
 #### Paso 5 — Kafka Events `[CLAUDE CODE]` ✅
-> Requiere modelos (Paso 1). No depende de views/services para escribir el producer.
+> Requiere modelos (Paso 1). Independiente de views/services para escribir el producer.
 
-- [x] `apps/policies/events.py` — clase `PolicyEventProducer`:
-  - `produce_policy_created(policy: Policy) → None`
-  - `produce_policy_updated(policy: Policy) → None`
-  - `produce_policy_cancelled(policy: Policy) → None`
-  - Schema estándar en todos: `{"event_id", "event_type", "occurred_at", "service", "data": {...}}`
-  - Usar `confluent_kafka.Producer` con `KAFKA_BOOTSTRAP_SERVERS` de settings
-  - Loggear con structlog en `on_delivery` callback (success y error)
-- [x] Llamar `produce_policy_created` desde `PolicyService.create_policy()`
-- [x] Llamar `produce_policy_cancelled` desde `PolicyService.cancel_policy()`
-- [x] Llamar `produce_policy_updated` desde `PolicyService.update_policy()`
+- [x] `apps/claims/events.py` — clase `ClaimEventProducer`:
+  - `produce_claim_filed(claim: Claim) → None` → topic `claim.filed`
+  - `produce_claim_status_changed(claim: Claim, from_status: str) → None` → topic `claim.status_changed`
+  - `produce_claim_resolved(claim: Claim) → None` → topic `claim.resolved`
+  - Schema estándar en todos:
+    ```python
+    {
+        "event_id": str(uuid4()),
+        "event_type": "claim.filed",
+        "occurred_at": timezone.now().isoformat(),
+        "service": "claims-service",
+        "data": {
+            "claim_id": str(claim.id),
+            "claim_number": claim.claim_number,
+            "policy_id": str(claim.policy_id),
+            "status": claim.status,
+            "incident_type": claim.incident_type,
+            "claimant_email": claim.claimant_email,
+        }
+    }
+    ```
+  - `_get_producer()` lazy import para evitar circular imports y facilitar mock en tests
+  - Loggear con structlog en `on_delivery` callback
 
 #### Paso 6 — Tests `[OPENCODE]` ✅
 > Requiere todo lo anterior completo.
 
-- [x] `apps/policies/tests/conftest.py` — factories con factory-boy:
-  - `CustomerFactory` — genera datos realistas con Faker
-  - `PolicyFactory` — con `customer` SubFactory, status=ACTIVE por defecto
-  - `CoverageFactory` — con `policy` SubFactory
-- [x] `apps/policies/tests/test_models.py`:
-  - `policy_number` se genera automáticamente en formato correcto
-  - UUIDs generados como PKs
-- [x] `apps/policies/tests/test_services.py` — unit tests, mock Kafka producer:
-  - `create_policy()` con customer válido → Policy creada + evento emitido
-  - `create_policy()` con customer inexistente → `CustomerNotFoundError`
-  - `cancel_policy()` con ACTIVE → OK, status=CANCELLED, reason guardado
-  - `cancel_policy()` con CANCELLED → `InvalidPolicyStatusError`
-  - `update_policy()` con EXPIRED → `InvalidPolicyStatusError`
-  - `verify_policy()` ACTIVE → `is_valid=True`
-  - `verify_policy()` CANCELLED → `is_valid=False`
-- [x] `apps/policies/tests/test_views.py` — integration tests con `@pytest.mark.django_db`:
-  - `POST /api/policies/customers/` → 201, body correcto
-  - `POST /api/policies/customers/` email duplicado → 400, formato error estándar
-  - `GET /api/policies/customers/{id}/` → 200
-  - `POST /api/policies/policies/` → 201, evento Kafka emitido (mock producer)
-  - `GET /api/policies/policies/?status=ACTIVE` → solo pólizas ACTIVE
-  - `POST /api/policies/policies/{id}/cancel/` → 200, status=CANCELLED
-  - `POST /api/policies/policies/{id}/cancel/` (ya cancelada) → 400, error estándar
-  - `GET /api/policies/policies/{id}/verify/` ACTIVE → `{"is_valid": true}`
-- [x] Cobertura: `uv run pytest --cov=apps/policies --cov-report=term-missing` → services.py 99%, views.py 88%
+- [x] `apps/claims/tests/conftest.py` — factories:
+  - `ClaimFactory` — `policy_id` como `LazyFunction(uuid4)`, status=FILED por defecto
+  - `ClaimStatusHistoryFactory`
+- [x] `apps/claims/tests/test_models.py`:
+  - `claim_number` se genera en formato CLM-YYYY-NNNNNN
+  - UUID PK generado
+- [x] `apps/claims/tests/test_services.py` — unit tests, mock `PolicyServiceClient` y Kafka:
+  - `file_claim()` con póliza ACTIVE → Claim creado, status=FILED, history guardado, evento emitido
+  - `file_claim()` con póliza CANCELLED → `PolicyInactiveError` (400)
+  - `file_claim()` con policy-service caído (timeout) → `PolicyServiceUnavailableError` (503)
+  - `transition_status()` FILED → UNDER_REVIEW → OK, history guardado, evento emitido
+  - `transition_status()` UNDER_REVIEW → APPROVED sin `approved_amount` → error
+  - `transition_status()` UNDER_REVIEW → APPROVED con `approved_amount` → OK
+  - `transition_status()` transición inválida (ej. FILED → APPROVED) → `InvalidClaimStatusError` con lista de transiciones válidas
+  - `transition_status()` a RESOLVED → emite `claim.resolved` además de `claim.status_changed`
+- [x] `apps/claims/tests/test_views.py` — integration tests con `@pytest.mark.django_db`:
+  - `POST /api/claims/claims/` → 201, status=FILED (mock PolicyServiceClient)
+  - `POST /api/claims/claims/` con póliza inactiva → 400, código `POLICY_INACTIVE`
+  - `POST /api/claims/claims/` con policy-service caído → 503, código `POLICY_SERVICE_UNAVAILABLE`
+  - `GET /api/claims/claims/?status=FILED` → lista filtrada
+  - `GET /api/claims/claims/{id}/` → incluye `status_history`
+  - `POST /api/claims/claims/{id}/transition/` FILED → UNDER_REVIEW → 200
+  - `POST /api/claims/claims/{id}/transition/` transición inválida → 400, código `INVALID_CLAIM_STATUS`
+  - `POST /api/claims/claims/{id}/transition/` → APPROVED sin `approved_amount` → 400
+- [x] Cobertura: `uv run pytest --cov=apps/claims --cov-report=term-missing` → services.py 96% (≥90%), views.py 100% (≥80%)
 
 ---
 
 ### ✅ Verificación final (ambos agentes)
 ```bash
-# Endpoints
-curl -X POST http://localhost:8001/api/policies/customers/ -H "Content-Type: application/json" -d '{"full_name":"Ana García","email":"ana@test.com","dni":"12345678A","phone":"600000001","address":"Calle Mayor 1"}'
-curl -X POST http://localhost:8001/api/policies/policies/ -H "Content-Type: application/json" -d '{"customer_id":"<uuid>","policy_type":"HEALTH","premium_amount":"150.00","start_date":"2026-01-01","end_date":"2027-01-01"}'
-curl http://localhost:8001/api/policies/policies/?status=ACTIVE
-curl -X POST http://localhost:8001/api/policies/policies/<uuid>/cancel/ -H "Content-Type: application/json" -d '{"reason":"Cliente solicitó cancelación"}'
-curl http://localhost:8001/api/policies/policies/<uuid>/verify/
+# Con policy-service levantado (puerto 8001) y claims-service (puerto 8002):
 
-# Kafka
-docker exec kafka kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic policy.created --from-beginning
+# Crear cliente y póliza en policy-service
+curl -X POST http://localhost:8001/api/policies/customers/ \
+  -H "Content-Type: application/json" \
+  -d '{"full_name":"Ana García","email":"ana@test.com","dni":"12345678A"}'
+
+curl -X POST http://localhost:8001/api/policies/policies/ \
+  -H "Content-Type: application/json" \
+  -d '{"customer_id":"<uuid>","policy_type":"HEALTH","premium_amount":"150.00","start_date":"2026-01-01","end_date":"2027-01-01"}'
+
+# Crear siniestro (verifica póliza internamente via HTTP)
+curl -X POST http://localhost:8002/api/claims/claims/ \
+  -H "Content-Type: application/json" \
+  -d '{"policy_id":"<uuid>","claimant_name":"Ana García","claimant_email":"ana@test.com","incident_date":"2026-03-15","incident_type":"ACCIDENTE","description":"Accidente en la A-6","estimated_damage":"5000.00"}'
+
+# Transicionar estado
+curl -X POST http://localhost:8002/api/claims/claims/<uuid>/transition/ \
+  -H "Content-Type: application/json" \
+  -d '{"new_status":"UNDER_REVIEW","notes":"Asignado a perito"}'
+
+curl -X POST http://localhost:8002/api/claims/claims/<uuid>/transition/ \
+  -H "Content-Type: application/json" \
+  -d '{"new_status":"APPROVED","notes":"Daños confirmados","approved_amount":"4500.00"}'
+
+# Verificar eventos Kafka
+docker exec kafka kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic claim.filed --from-beginning
+docker exec kafka kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic claim.status_changed --from-beginning
 
 # Tests
-cd policy-service && uv run pytest --cov=apps/policies -v
+cd claims-service && uv run pytest --cov=apps/claims -v
 
 # OpenAPI
-curl http://localhost:8001/api/schema/
+curl http://localhost:8002/api/schema/
 ```
 
 ---
@@ -200,7 +279,7 @@ curl http://localhost:8001/api/schema/
 |---|---|---|---|
 | 0 | Setup e Infraestructura | ✅ Completado |
 | 1 | policy-service | ✅ Completado |
-| 2 | claims-service | ❌ No iniciado |
+| 2 | claims-service | ✅ Completado |
 | 3 | audit-service + notification-service | ❌ No iniciado |
 | 4 | Observabilidad | ❌ No iniciado |
 | 5 | Gateway + Rate Limiting | ❌ No iniciado |
@@ -224,15 +303,18 @@ curl http://localhost:8001/api/schema/
 - ✅ 4 Django 5.2 service esqueletos con health `/health/` respondiendo
 - ✅ CI workflows (5) pasando en verde
 - ✅ PR Phase 0 mergeado a dev
+- ✅ PR Phase 1 mergeado a dev
 - ✅ policy-service: models, serializers, services, views, Kafka events, admin, tests (36 tests, 97% cov)
+- ✅ claims-service: models (Claim, ClaimStatusHistory, ClaimDocument), migrations (2), serializers (5), services, PolicyServiceClient, views (ClaimViewSet), Kafka events (3 topics), admin, tests (39 tests, 96% services.py, 100% views.py) — **Fase 2 completa**
 
 ---
 
 ## Decisiones tomadas recientemente
 
-- **custom_exception_handler** mejorado para manejar `ValidationError` con field-level errors → los pone en `details` y usa mensaje genérico "Error de validación de los datos enviados."
-- **events.py** `_build_event` usa `_date_to_str()` helper para manejar tanto `date` objects como strings (compatibilidad SQLite en tests)
-- **Policy types**: inglés (LIFE/HEALTH/AUTO/HOME/BUSINESS) alineado en modelos, API_DESIGN y CONTEXT
+- **Serializer `policy_id` writable**: Se agregó `extra_kwargs = {"policy_id": {"read_only": False}}` porque el modelo tiene `editable=False` y DRF lo volvía read-only automáticamente.
+- **Mock de `verify_policy`**: Para tests de error se usa `side_effect` con la excepción de dominio, no `return_value`. El mock reemplaza TODO el método, así que la lógica interna de `is_valid` no se ejecuta.
+- **ClaimStatusHistory.from_status**: modelo usa `null=True, blank=True`. El service guarda `""` (string vacío) para el primer registro FILED, no NULL. Compatible con PostgreSQL y SQLite.
+- **`_get_producer()`** usa lazy import en services.py para que el código compile aunque events.py no esté creado aún.
 
 ---
 
@@ -285,33 +367,36 @@ _Ninguno por ahora._
 4. **Si otro agente está trabajando**, se indica en la sección "Agentes activos" abajo
 5. **Orden de merge**: el agente que empezó primero mergea primero. El segundo hace rebase después.
 
-### Agentes activos ahora — Fase 1
+### Agentes activos ahora — Fase 2 (completada)
 
 | Agente | Rama | Tareas asignadas |
 |---|---|---|
-| **Claude Code** | `feat/phase-1-policy-service` | Paso 0 (core/) → Paso 2 (Serializers) → Paso 4 (Views+URLs+Admin) → Paso 5 (Kafka events) |
-| **OpenCode** | `feat/phase-1-policy-service` | Paso 1 (Models+Migrations) → Paso 3 (Services) → Paso 6 (Tests) |
+| **Claude Code** | `feat/phase-2-claims-service` | Paso 0, 2, 4, 5 ✅ |
+| **OpenCode** | `feat/phase-2-claims-service` | Paso 1, 3, 6 ✅ |
+
+> **Fase 2 completa.** Ambos agentes terminaron. Pendiente: commit y merge.
 
 ### División de archivos — quién toca qué
 
 | Archivo | Agente responsable |
 |---|---|
 | `apps/core/exceptions.py` | Claude Code |
-| `apps/core/middleware.py` | Claude Code |
-| `apps/core/pagination.py` | Claude Code |
-| `apps/policies/models.py` | OpenCode |
-| `apps/policies/serializers.py` | Claude Code |
-| `apps/policies/services.py` | OpenCode |
-| `apps/policies/views.py` | Claude Code |
-| `apps/policies/urls.py` | Claude Code |
-| `apps/policies/admin.py` | Claude Code |
-| `apps/policies/events.py` | Claude Code |
-| `apps/policies/tests/conftest.py` | OpenCode |
-| `apps/policies/tests/test_models.py` | OpenCode |
-| `apps/policies/tests/test_services.py` | OpenCode |
-| `apps/policies/tests/test_views.py` | OpenCode |
-| `config/settings/base.py` | Claude Code (agregar middleware + exception handler) |
-| `config/urls.py` | Claude Code (incluir URLs de policies) |
+| `apps/core/middleware.py` | Claude Code (verificar, no modificar si ya OK) |
+| `apps/core/pagination.py` | Claude Code (verificar, no modificar si ya OK) |
+| `claims-service/apps/claims/models.py` | OpenCode |
+| `claims-service/apps/claims/serializers.py` | Claude Code |
+| `claims-service/apps/claims/services.py` | OpenCode |
+| `claims-service/apps/claims/clients.py` | OpenCode |
+| `claims-service/apps/claims/views.py` | Claude Code |
+| `claims-service/apps/claims/urls.py` | Claude Code |
+| `claims-service/apps/claims/admin.py` | Claude Code |
+| `claims-service/apps/claims/events.py` | Claude Code |
+| `claims-service/apps/claims/tests/conftest.py` | OpenCode |
+| `claims-service/apps/claims/tests/test_models.py` | OpenCode |
+| `claims-service/apps/claims/tests/test_services.py` | OpenCode |
+| `claims-service/apps/claims/tests/test_views.py` | OpenCode |
+| `claims-service/config/settings/base.py` | Claude Code (añadir POLICY_SERVICE_URL, apps.claims) |
+| `claims-service/config/urls.py` | Claude Code (incluir URLs de claims) |
 
 > ⚠️ Si necesitas tocar un archivo que no es tuyo → pregunta al usuario primero.
 
@@ -319,24 +404,24 @@ _Ninguno por ahora._
 
 ```
 RONDA 1 (paralelo — sin dependencias entre sí):
-  Claude Code → Paso 0: core/
-  OpenCode    → Paso 1: Models + Migrations
+  Claude Code → Paso 0: core/ exceptions + verificar settings
+  OpenCode    → Paso 1: Models + Migrations (Claim, ClaimStatusHistory, ClaimDocument)
 
-    ↓ esperar a que ambos terminen Ronda 1 ↓
+    ↓ avisar al usuario cuando ambos terminen Ronda 1 ↓
 
 RONDA 2 (paralelo — requieren Ronda 1):
-  Claude Code → Paso 2: Serializers  (necesita modelos)
-  OpenCode    → Paso 3: Services     (necesita modelos + excepciones de core/)
+  Claude Code → Paso 2: Serializers       (necesita modelos)
+  OpenCode    → Paso 3: Services + Client (necesita modelos + excepciones de core/)
 
-    ↓ esperar a que ambos terminen Ronda 2 ↓
+    ↓ avisar al usuario cuando ambos terminen Ronda 2 ↓
 
 RONDA 3 (paralelo — requieren Ronda 2):
   Claude Code → Paso 4: Views + URLs + Admin  (necesita serializers + services)
-  Claude Code → Paso 5: Kafka events          (puede ir junto al Paso 4)
+  Claude Code → Paso 5: Kafka events          (se hace junto al Paso 4)
   OpenCode    → Paso 6: Tests                 (necesita todo lo anterior)
 ```
 
-> Cada agente avisa al usuario cuando termina su ronda. El usuario da el OK para avanzar a la siguiente.
+> Cada agente avisa al usuario cuando termina su ronda. El usuario coordina el avance.
 
 ### Resolución de conflictos
 
@@ -351,6 +436,55 @@ Si un agente encuentra un problema en el trabajo del otro (campo mal nombrado, e
 - El fix es pequeño y obvio (renombrar un campo, añadir una excepción, corregir un import)
 - No cambia la lógica de negocio ni la arquitectura
 - El cambio está dentro del alcance natural de su tarea actual
+
+---
+
+## Plan de commits — Fase 2 (claims-service)
+
+> Orden de ejecucion: 1 -> 2 -> 3. Cada commit es atomico.
+> Ejecutar `git add` + `git commit -m "..."`. No pushear hasta confirmacion.
+
+### Commit 1: `feat(claims): add models, serializers, services, client, events, views, urls, admin`
+
+Todo el codigo de produccion de claims-service mas excepciones de dominio y el fix del handler.
+
+```
+git add claims-service/apps/claims/models.py \
+        claims-service/apps/claims/migrations/ \
+        claims-service/apps/claims/serializers.py \
+        claims-service/apps/claims/services.py \
+        claims-service/apps/claims/clients.py \
+        claims-service/apps/claims/events.py \
+        claims-service/apps/claims/views.py \
+        claims-service/apps/claims/admin.py \
+        claims-service/apps/claims/urls.py \
+        claims-service/apps/core/exceptions.py
+
+git commit -m "feat(claims): add models, serializers, services, client, events, views, urls, admin"
+```
+
+### Commit 2: `test(claims): add 39 unit and integration tests`
+
+```
+git add claims-service/apps/claims/tests/
+
+git commit -m "test(claims): add 39 unit and integration tests"
+```
+
+### Commit 3: `chore: update deps, docs, context, and fix policy-service exception handler`
+
+```
+git add CONTEXT.md \
+        docs/PHASES.md \
+        docs/TECHNICAL_DECISIONS.md \
+        claims-service/pyproject.toml \
+        claims-service/uv.lock \
+        policy-service/apps/core/exceptions.py
+
+git commit -m "chore: update deps, docs, context, and fix policy-service exception handler"
+```
+
+### Cobertura: 39 tests | services.py 96% | views.py 100%
 
 Al terminar, documenta qué corrigió en "Decisiones tomadas recientemente" para que el otro agente lo sepa.
 

@@ -11,7 +11,10 @@ def custom_exception_handler(exc, context):
 
         if isinstance(exc, ValidationError) and isinstance(exc.detail, dict):
             details = {
-                field: [str(e) for e in errors] for field, errors in exc.detail.items()
+                field: [
+                    str(e) for e in (errors if isinstance(errors, list) else [errors])
+                ]
+                for field, errors in exc.detail.items()
             }
             message = "Error de validación de los datos enviados."
             code = getattr(exc, "code", "VALIDATION_ERROR")
