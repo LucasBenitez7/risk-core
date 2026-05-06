@@ -1,3 +1,4 @@
+from rest_framework.exceptions import APIException, ValidationError
 from rest_framework.views import exception_handler
 
 
@@ -7,13 +8,39 @@ def custom_exception_handler(exc, context):
     if response is not None:
         request = context["request"]
         request_id = getattr(request, "request_id", "")
+
+        if isinstance(exc, ValidationError) and isinstance(exc.detail, dict):
+            details = {
+                field: [
+                    str(e) for e in (errors if isinstance(errors, list) else [errors])
+                ]
+                for field, errors in exc.detail.items()
+            }
+            message = "Error de validación de los datos enviados."
+            code = getattr(exc, "code", "VALIDATION_ERROR")
+        else:
+            details = getattr(exc, "details", {})
+            message = str(exc)
+            code = getattr(exc, "code", "INTERNAL_ERROR")
+
         response.data = {
             "error": {
-                "code": getattr(exc, "code", "INTERNAL_ERROR"),
-                "message": str(exc),
-                "details": getattr(exc, "details", {}),
+                "code": code,
+                "message": message,
+                "details": details,
             },
             "request_id": request_id,
         }
 
     return response
+
+
+class AuditEventNotFoundError(APIException):
+    status_code = 404
+    default_code = "AUDIT_EVENT_NOT_FOUND"
+    code = "AUDIT_EVENT_NOT_FOUND"
+    details = {}
+
+    def __init__(self, event_id=None):
+        self.details = {"event_id": str(event_id)} if event_id else {}
+        super().__init__(detail="El evento de auditoría solicitado no existe.")
