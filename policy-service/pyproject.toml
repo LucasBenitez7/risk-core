@@ -46,6 +46,28 @@ known-first-party = ["apps", "config"]
 "config/settings/*.py" = ["F403", "F405"]
 "apps/*/urls.py" = ["F401"]
 
+[tool.mypy]
+ignore_missing_imports = true
+disallow_untyped_defs = false
+check_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = "apps.*.models"
+disable_error_code = ["var-annotated"]
+
+[[tool.mypy.overrides]]
+module = "apps.core.*"
+disable_error_code = ["var-annotated"]
+
+[[tool.mypy.overrides]]
+module = "apps.policies.*"
+disable_error_code = ["attr-defined"]
+
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "config.settings.test"
 python_files = ["test_*.py"]
+
+[dependency-groups]
+dev = [
+    "pytest-cov>=7.1.0",
+]

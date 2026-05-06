@@ -128,9 +128,9 @@ Detalle de cliente.
   "policies": [
     {
       "id": "uuid",
-      "policy_type": "VIDA",
-      "status": "ACTIVE",
-      "premium_amount": "150.00"
+  "policy_type": "LIFE",
+  "status": "ACTIVE",
+  "premium_amount": "150.00"
     }
   ]
 }
@@ -148,20 +148,19 @@ Crear nueva póliza.
 ```json
 {
   "customer_id": "550e8400-...",
-  "policy_type": "VIDA",
+  "policy_type": "LIFE",
   "start_date": "2025-02-01",
   "end_date": "2026-02-01",
   "premium_amount": "150.00",
-  "payment_frequency": "MONTHLY",
   "coverages": [
     {
-      "coverage_type": "FALLECIMIENTO",
-      "max_amount": "100000.00",
+      "coverage_type": "LIFE",
+      "coverage_amount": "100000.00",
       "description": "Cobertura por fallecimiento del asegurado"
     },
     {
-      "coverage_type": "INVALIDEZ",
-      "max_amount": "50000.00",
+      "coverage_type": "DISABILITY",
+      "coverage_amount": "50000.00",
       "description": "Cobertura por invalidez permanente"
     }
   ]
@@ -174,12 +173,11 @@ Crear nueva póliza.
   "id": "uuid",
   "policy_number": "POL-2025-000001",
   "customer_id": "550e8400-...",
-  "policy_type": "VIDA",
+  "policy_type": "LIFE",
   "status": "ACTIVE",
   "start_date": "2025-02-01",
   "end_date": "2026-02-01",
   "premium_amount": "150.00",
-  "payment_frequency": "MONTHLY",
   "coverages": [...],
   "created_at": "2025-01-15T10:00:00Z"
 }
@@ -191,7 +189,7 @@ Crear nueva póliza.
 - 400 — customer_id no existe / fechas inválidas / premium <= 0
 - 404 — cliente no encontrado
 
-**Tipos de póliza válidos**: `VIDA`, `HOGAR`, `AUTO`, `SALUD`, `RESPONSABILIDAD_CIVIL`
+**Tipos de póliza válidos**: `LIFE`, `HEALTH`, `AUTO`, `HOME`, `BUSINESS`
 
 ---
 
@@ -201,7 +199,7 @@ Listar pólizas con filtros.
 **Query params**
 - `page`, `page_size`
 - `status` — `ACTIVE`, `SUSPENDED`, `CANCELLED`, `EXPIRED`
-- `policy_type` — `VIDA`, `HOGAR`, `AUTO`, `SALUD`, `RESPONSABILIDAD_CIVIL`
+- `policy_type` — `LIFE`, `HEALTH`, `AUTO`, `HOME`, `BUSINESS`
 - `customer_id` — UUID
 - `ordering` — `created_at`, `-created_at`, `premium_amount`, `-premium_amount`
 
@@ -217,7 +215,7 @@ Listar pólizas con filtros.
       "policy_number": "POL-2025-000001",
       "customer_id": "uuid",
       "customer_name": "María García López",
-      "policy_type": "VIDA",
+      "policy_type": "LIFE",
       "status": "ACTIVE",
       "premium_amount": "150.00",
       "start_date": "2025-02-01",
@@ -242,17 +240,16 @@ Detalle de póliza con coberturas.
     "full_name": "María García López",
     "email": "maria.garcia@email.com"
   },
-  "policy_type": "VIDA",
+  "policy_type": "LIFE",
   "status": "ACTIVE",
   "start_date": "2025-02-01",
   "end_date": "2026-02-01",
   "premium_amount": "150.00",
-  "payment_frequency": "MONTHLY",
   "coverages": [
     {
       "id": "uuid",
-      "coverage_type": "FALLECIMIENTO",
-      "max_amount": "100000.00",
+      "coverage_type": "LIFE",
+      "coverage_amount": "100000.00",
       "description": "..."
     }
   ],
@@ -322,7 +319,7 @@ Endpoint interno — verifica si una póliza existe y está activa. Llamado por 
   "id": "uuid",
   "status": "ACTIVE",
   "customer_id": "uuid",
-  "policy_type": "VIDA",
+  "policy_type": "LIFE",
   "is_valid": true
 }
 ```
@@ -713,7 +710,7 @@ Todos los servicios devuelven el mismo formato de error:
     "customer_id": "uuid",
     "customer_email": "maria.garcia@email.com",
     "customer_name": "María García López",
-    "policy_type": "VIDA",
+    "policy_type": "LIFE",
     "premium_amount": "150.00",
     "start_date": "2025-02-01",
     "end_date": "2026-02-01"
@@ -796,7 +793,7 @@ ws://gateway/ws/events/?token=<jwt_access_token>
     "policy_id": "uuid",
     "policy_number": "POL-2025-000001",
     "customer_name": "María García López",
-    "policy_type": "VIDA"
+    "policy_type": "LIFE"
   }
 }
 ```
@@ -833,11 +830,11 @@ Métricas de pólizas para el dashboard. Sin paginación.
   "active_policies": 430,
   "policies_today": 12,
   "policies_by_type": {
-    "VIDA": 180,
-    "HOGAR": 120,
+    "LIFE": 180,
+    "HOME": 120,
     "AUTO": 95,
-    "SALUD": 25,
-    "RESPONSABILIDAD_CIVIL": 10
+    "HEALTH": 25,
+    "BUSINESS": 10
   },
   "total_premium_active": "64500.00"
 }

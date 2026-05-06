@@ -1,5 +1,48 @@
 # RiskCore — Project Rules for AI Agents (Cline / OpenCode)
 
+---
+
+## ⛔ ABSOLUTE RULE — Read before doing anything
+
+**NEVER run `git commit` or `git push` without explicit user confirmation.**
+
+- "Implement X" → NOT permission to commit
+- "Fix the bug" → NOT permission to commit
+- "Finish the task" → NOT permission to commit
+
+The only valid permission is the user explicitly saying: *"yes, commit"*, *"commit group 1"*, or similar.
+
+**Allowed without asking:** `git status`, `git diff`, `git log`, `git branch`, `git stash`
+**BLOCKED until explicit permission:** `git commit`, `git push`, `git merge`, `git rebase`, `git tag`
+
+---
+
+## Instruction priority
+
+```
+1. CONTEXT.md       ← ALWAYS read first (state + active rules)
+2. This file        ← project rules (ALWAYS applies)
+3. CLAUDE.md        ← full context and patterns
+4. docs/            ← reference (read when needed)
+5. .agents/skills/  ← generic patterns (project rules override if conflict)
+```
+
+**If a skill contradicts this file → this file wins.**
+
+### When to read docs
+- `docs/API_DESIGN.md` → when creating endpoints
+- `docs/TECHNICAL_DECISIONS.md` → when you need to understand WHY
+- `docs/PHASES.md` → when checking what's left to do
+- `docs/GUIA_PROYECTO.md` → for business domain context
+
+### Skills (`.agents/skills/`) — important caveats
+- `django-expert` / `django-patterns`: useful BUT business logic ALWAYS in services.py (never views)
+- `test-driven-development`: useful for patterns BUT follow plan order (models → services → tests), not strict TDD
+- `next-best-practices`: only relevant during frontend work (Phase 7)
+- **When in doubt, follow THIS file and CLAUDE.md, not the skill**
+
+---
+
 ## Project Overview
 Insurance microservices backend portfolio project. 4 Django microservices + Next.js 15 dashboard + Kafka event-driven architecture.
 
@@ -96,9 +139,13 @@ async with httpx.AsyncClient(timeout=5.0) as client:
 # timeout → 503 response, invalid policy → 400 response
 ```
 
-### Structured logs — always pass request_id
+### Structured logs — request_id injected by middleware automatically
 ```python
-logger.info("event_name", entity_id=str(obj.id), request_id=request.headers.get("X-Request-ID"))
+# In HTTP views: middleware binds request_id via structlog.contextvars — do NOT pass manually
+logger.info("policy_created", policy_id=str(policy.id), customer_id=str(policy.customer_id))
+
+# In Celery tasks / Kafka consumers (no HTTP context): bind manually
+logger.info("email_sent", notification_id=notification_id, request_id=task_request_id)
 ```
 
 ### Error format — same across all services
@@ -178,6 +225,44 @@ Valid scopes: `policy`, `claims`, `notifications`, `audit`, `infra`, `frontend`,
 
 ### Commit grouping — one logical change per commit
 Group related changes together. Never mix unrelated files in one commit.
+
+### Pull Request format — always follow this
+
+**Title** — max 72 chars:
+```
+[Phase N] scope: imperative summary
+```
+Examples:
+```
+[Phase 1] policy-service: models, API, Kafka events, tests
+[Phase 2] claims-service: state machine, inter-service verify
+[Phase 3] consumers: audit append-only, notifications via Celery
+```
+
+**Description** — always this structure:
+```markdown
+## ¿Qué incluye este PR?
+- Bullet per logical module (models, services, views, events, tests…)
+
+## Decisiones técnicas destacadas
+- One line per non-obvious decision (pattern chosen, tradeoff, workaround)
+
+## Tests
+- Number of tests added and coverage reached
+- Which critical scenarios are covered
+
+## Cómo verificar
+- Concrete commands to test key endpoints or behavior
+
+🤖 Co-developed with Claude Code + OpenCode
+```
+
+Rules:
+- Scope = service or area name (`policy-service`, `claims-service`, `infra`, `frontend`)
+- Imperative verb, no trailing period
+- Never include issue/ticket numbers (no external tracker)
+- PR goes `feat/phase-N` → `dev`, never directly to `main`
+- Agent never opens or merges a PR without explicit user confirmation
 
 ---
 
