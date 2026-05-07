@@ -44,6 +44,9 @@ jobs:
       - name: Mypy
         working-directory: claims-service
         run: uv run mypy . --ignore-missing-imports || true
+      - name: Bandit
+        working-directory: claims-service
+        run: uv run bandit -r apps/ -ll
       - name: Pytest
         working-directory: claims-service
         env:

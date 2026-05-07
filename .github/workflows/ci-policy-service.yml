@@ -44,6 +44,9 @@ jobs:
       - name: Mypy
         working-directory: policy-service
         run: uv run mypy . --ignore-missing-imports || true
+      - name: Bandit
+        working-directory: policy-service
+        run: uv run bandit -r apps/ -ll
       - name: Pytest
         working-directory: policy-service
         env:

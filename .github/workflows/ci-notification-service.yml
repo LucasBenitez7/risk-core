@@ -53,6 +53,9 @@ jobs:
       - name: Mypy
         working-directory: notification-service
         run: uv run mypy . --ignore-missing-imports || true
+      - name: Bandit
+        working-directory: notification-service
+        run: uv run bandit -r apps/ -ll
       - name: Pytest
         working-directory: notification-service
         env:
