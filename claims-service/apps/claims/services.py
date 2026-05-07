@@ -5,6 +5,7 @@ from rest_framework.exceptions import ValidationError
 from apps.claims.clients import PolicyServiceClient
 from apps.claims.models import Claim, ClaimStatusHistory
 from apps.core.exceptions import InvalidClaimStatusError
+from apps.core.metrics import claims_filed_total, claims_status_changed_total
 
 logger = structlog.get_logger()
 
@@ -47,11 +48,13 @@ class ClaimService:
             )
 
         _get_producer().produce_claim_filed(claim)
+        claims_filed_total.labels(incident_type=claim.incident_type).inc()
         logger.info(
             "claim_filed",
             claim_number=claim.claim_number,
             claim_id=str(claim.id),
             policy_id=str(claim.policy_id),
+            incident_type=claim.incident_type,
         )
         return claim
 
@@ -101,6 +104,9 @@ class ClaimService:
             )
 
         _get_producer().produce_claim_status_changed(claim, current_status)
+        claims_status_changed_total.labels(
+            from_status=current_status, to_status=new_status
+        ).inc()
         logger.info(
             "claim_status_changed",
             claim_number=claim.claim_number,

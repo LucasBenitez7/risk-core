@@ -1,9 +1,15 @@
 import json
+import time
 
 import structlog
 from confluent_kafka import Consumer, KafkaError
 from decouple import config
 from django.db import IntegrityError
+
+from apps.core.metrics import (
+    kafka_messages_processed_total,
+    kafka_processing_duration_seconds,
+)
 
 from .services import AuditService
 
@@ -54,18 +60,60 @@ class AuditKafkaConsumer:
         try:
             payload = json.loads(msg.value().decode("utf-8"))
         except (json.JSONDecodeError, UnicodeDecodeError) as e:
-            logger.error("invalid_message_format", topic=msg.topic(), error=str(e))
+            logger.error(
+                "invalid_message_format",
+                topic=msg.topic(),
+                partition=msg.partition(),
+                offset=msg.offset(),
+                error=str(e),
+            )
             return
 
+        topic = msg.topic()
+        event_id = payload.get("event_id", "")
+        event_type = payload.get("event_type", "")
+
+        structlog.contextvars.bind_contextvars(event_id=event_id)
+        logger.info(
+            "kafka_message_received",
+            topic=topic,
+            partition=msg.partition(),
+            offset=msg.offset(),
+            event_type=event_type,
+        )
+
+        start = time.perf_counter()
         try:
-            self._service.process_event(payload, topic=msg.topic())
+            self._service.process_event(payload, topic=topic)
+            duration = time.perf_counter() - start
             self._consumer.commit(message=msg)
-        except IntegrityError:
-            logger.warning("duplicate_event", event_id=payload.get("event_id"))
-            self._consumer.commit(message=msg)
-        except Exception as e:
-            logger.error(
-                "event_processing_failed",
-                error=str(e),
-                event_id=payload.get("event_id"),
+            kafka_messages_processed_total.labels(topic=topic, result="ok").inc()
+            kafka_processing_duration_seconds.labels(topic=topic).observe(duration)
+            logger.info(
+                "kafka_message_processed",
+                topic=topic,
+                offset=msg.offset(),
+                event_type=event_type,
+                processing_time_ms=round(duration * 1000, 2),
             )
+        except IntegrityError:
+            self._consumer.commit(message=msg)
+            kafka_messages_processed_total.labels(topic=topic, result="duplicate").inc()
+            logger.warning(
+                "kafka_message_duplicate",
+                event_id=event_id,
+                topic=topic,
+                offset=msg.offset(),
+            )
+        except Exception as e:
+            kafka_messages_processed_total.labels(topic=topic, result="error").inc()
+            logger.error(
+                "kafka_message_failed",
+                topic=topic,
+                offset=msg.offset(),
+                event_type=event_type,
+                error=str(e),
+                exc_info=True,
+            )
+        finally:
+            structlog.contextvars.unbind_contextvars("event_id")
