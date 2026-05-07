@@ -39,115 +39,97 @@ Permitido sin pedir permiso: `git status`, `git diff`, `git log`, `git branch`, 
 ---
 
 <a id="s2"></a>
-## 2. ⚠️ Reglas críticas — fase actual (Fase 3: consumers)
+## 2. ⚠️ Reglas críticas — fase actual (Fase 4: observabilidad)
 
 > Estas reglas cambian según la fase. Reemplazar completo al iniciar una fase nueva.
 > Ver tabla de reglas por fase en [Sección 10](#s10).
 
-1. **`AuditEvent` es APPEND-ONLY — nunca UPDATE ni DELETE**. Requisito regulatorio. No existe `UpdateAPIView` ni `DestroyAPIView` en audit-service. Solo INSERT. Nunca modificar un evento ya guardado.
+1. **Logs en JSON con structlog — nunca `print()` ni `logging.info()` con formato libre**. Toda salida estructurada vía `structlog.get_logger()`. Cada log debe ser parseable como JSON por Loki sin transformaciones.
 
-2. **Emails SOLO vía Celery task — NUNCA en el consumer Kafka directamente**. El consumer crea el registro `Notification` y dispara `send_email_notification.delay(notification_id)`. La task envía el email. Esto desacopla el consumer (crítico) del canal de email (no crítico).
+2. **`request_id` se propaga vía middleware — NUNCA pasarlo manualmente como parámetro**. `RequestIDMiddleware` ya hace `structlog.contextvars.bind_contextvars(request_id=...)`. Cualquier `logger.info(...)` dentro del request lo incluye automáticamente. No agregar `request_id=...` a mano salvo en consumers/tasks (donde no hay request HTTP).
 
-3. **`AuditEvent.event_id` es UNIQUE** — el campo `event_id` del payload Kafka se guarda y es único. Si el consumer procesa un evento duplicado (at-least-once), la IntegrityError se captura, se loggea como "ya procesado" y se hace commit del offset. Nunca re-lanzar la excepción.
+3. **Campos obligatorios en cada log**: `timestamp`, `level`, `service`, `event` (snake_case del nombre del log), `request_id` (auto vía middleware en HTTP). No agregar campos redundantes como `module`/`logger_name` — structlog ya los incluye.
 
-4. **Commit de offset DESPUÉS del INSERT en DB** — `enable.auto.commit=False`. El consumer hace `consumer.commit(message=msg)` explícitamente solo después de guardar el AuditEvent / crear la Notification. Si el INSERT falla (excepto duplicado), NO commitear — el mensaje se re-procesará.
+4. **`/metrics` endpoint expuesto en cada servicio Django** vía `django-prometheus`. En producción (Fase 5) se protegerá con IP whitelist en el gateway. En desarrollo abierto. URL: `/metrics` (no `/api/metrics/`).
 
-5. **Consumer group IDs fijos**: `group.id = "audit-service"` y `group.id = "notification-service"`. No cambiarlos — Kafka trackea el offset por group.id.
+5. **Métricas de negocio nombradas con prefijo `riskcore_`**. Ejemplos: `riskcore_policies_created_total`, `riskcore_claims_filed_total`, `riskcore_kafka_messages_processed_total`, `riskcore_notifications_sent_total`. Nunca `django_*` (ya existen) ni nombres genéricos.
 
-6. **Tests junto con el código — nunca al final**. Tests se escriben en la misma ronda que el módulo. Cobertura mínima: `consumers.py` 80%, `tasks.py` 80%, `services.py` 90%.
+6. **Dashboards Grafana versionados como JSON** en `infra/grafana/dashboards/`. Nada se configura por UI — todo provisioning automático vía `infra/grafana/provisioning/`. Si tocás un dashboard en la UI, exportá el JSON y commitéalo.
 
-7. **Celery retry strategy** (production): `max_retries=3`, `countdown=300` (5 min entre reintentos). `soft_time_limit=25`. Configurado en `notification-service/config/celery.py` y en la task, no en base.py.
+7. **Logs de Kafka consumer obligatorios**: cada `process_event` debe loguear `topic`, `partition`, `offset`, `event_type`, `processing_time_ms`. Errores con `exc_info=True` para que el stack trace llegue a Loki.
+
+8. **Logs de Celery tasks obligatorios** (notification-service): `task_name`, `task_id`, `status` (`started`/`success`/`failed`/`retry`), `duration_ms`, `attempt` (en retries).
+
+9. **Tests de instrumentación**: cada servicio debe tener al menos un test que verifique que `/metrics` responde 200 con un counter custom incrementado tras una operación. No mockear prometheus.
 
 ---
 
 <a id="s3"></a>
 ## 3. Estado actual
 
-**Fase**: 3 — audit-service + notification-service
-**Rama activa**: `feat/phase-3-consumers`
-**Última tarea completada**: RONDA 4 — OpenCode: Paso 4b notification-service (Tests, 21/21 ✅, tasks 100%, consumers 93%, views 100%)
-**Próximo paso**: Fase 3 COMPLETA para ambos servicios. Verificación final y preparar commits.
+**Fase**: 4 — Observabilidad
+**Rama activa**: `feat/phase-4-observability`
+**Última tarea completada**: Fase 4 completa — verificación end-to-end pasada ✅
+**Próximo paso**: Pendiente confirmación del usuario para commits
 
 ---
 
 <a id="s4"></a>
-## 4. Plan detallado — Fase 3 (audit-service + notification-service)
+## 4. Plan detallado — Fase 4 (Observabilidad)
 
 > Este plan es editable por cualquier agente. Marcar `[x]` al completar cada paso.
-> Rama: `feat/phase-3-consumers` | Scope commits: `audit`, `notifications`
-> **Un agente por servicio — trabajan en paralelo desde el inicio.**
+> Rama: `feat/phase-4-observability` | Scope commits: `infra`, `policy`, `claims`, `notifications`, `audit`
+> **Dos agentes en paralelo: Claude Code = código (los 4 servicios) · OpenCode = infra (Loki/Prometheus/Grafana).**
 
 ---
 
 ### Contexto de dominio — leer antes de empezar
 
-**Flujo de eventos** (lo que esta fase implementa):
+**Pipeline de observabilidad que construye esta fase:**
+
 ```
-policy-service  ──kafka──▶  audit-service     (graba AuditEvent inmutable)
-claims-service  ──kafka──▶  notification-service  (crea Notification → Celery → email)
+[4 servicios Django] ──JSON logs (stdout)──▶ [Promtail] ──▶ [Loki] ──┐
+[4 servicios Django] ──/metrics──────▶ [Prometheus]──────────────────┤
+                                                                     ├──▶ [Grafana] (dashboards + alerts)
+[Celery worker]      ──JSON logs (stdout)──▶ [Promtail] ──▶ [Loki] ──┘
 ```
 
-**Topics que consume audit-service** (todos):
-- `policy.created`, `policy.updated`, `policy.cancelled`
-- `claim.filed`, `claim.status_changed`, `claim.resolved`
+**Stack a añadir** (todas versiones del CLAUDE.md):
+- `structlog 25.x` — ya está en el middleware, falta configurarlo en `LOGGING` y processors
+- `django-prometheus 0.3.x` — middleware + `/metrics` endpoint + métricas DB/cache
+- `prometheus-client` (transitivo) — para counters custom de negocio
+- Loki 2.9.x · Promtail 2.9.x · Prometheus 2.55.x · Grafana 11.x (Docker images)
 
-**Topics que consume notification-service** (solo los relevantes para email):
-- `policy.created` → "Su póliza ha sido creada"
-- `policy.cancelled` → "Su póliza ha sido cancelada"
-- `claim.filed` → "Su siniestro ha sido registrado"
-- `claim.status_changed` → "El estado de su siniestro ha cambiado"
-- `claim.resolved` → "Su siniestro ha sido resuelto"
-
-**Payload Kafka recibido** (formato estándar de Fases 1+2):
+**Contrato de log JSON** (todos los servicios deben emitir esto):
 ```json
 {
-  "event_id": "uuid",
-  "event_type": "policy.created",
-  "occurred_at": "2026-03-15T10:00:00Z",
+  "timestamp": "2026-05-07T10:00:00.000Z",
+  "level": "info",
   "service": "policy-service",
-  "data": { "policy_id": "uuid", "claimant_email": "..." }
+  "event": "policy_created",
+  "request_id": "uuid",
+  "policy_id": "uuid",
+  "customer_id": "uuid"
 }
 ```
 
-**Patrón de idempotencia en el consumer** (crítico — at-least-once delivery):
-```python
-try:
-    AuditService().process_event(payload, topic=msg.topic())
-    consumer.commit(message=msg)
-except IntegrityError:
-    logger.warning("duplicate_event", event_id=payload.get("event_id"))
-    consumer.commit(message=msg)
-except Exception as e:
-    logger.error("event_processing_failed", error=str(e))
-    # NO commitear → Kafka re-entregará el mensaje
-```
+**Métricas custom requeridas (mínimo)**:
+| Servicio | Métrica | Tipo | Labels |
+|---|---|---|---|
+| policy | `riskcore_policies_created_total` | Counter | `policy_type` |
+| policy | `riskcore_policies_cancelled_total` | Counter | — |
+| claims | `riskcore_claims_filed_total` | Counter | `incident_type` |
+| claims | `riskcore_claims_status_changed_total` | Counter | `from_status`, `to_status` |
+| audit | `riskcore_kafka_messages_processed_total` | Counter | `topic`, `result` (ok/duplicate/error) |
+| audit | `riskcore_kafka_processing_duration_seconds` | Histogram | `topic` |
+| notification | `riskcore_notifications_sent_total` | Counter | `event_type`, `status` (sent/failed) |
+| notification | `riskcore_celery_task_duration_seconds` | Histogram | `task_name` |
 
-**Patrón de Celery task en notification-service**:
-```python
-# consumer.py — SOLO crea Notification y dispara la task
-notification = Notification.objects.create(event_type=event_type, ...)
-send_email_notification.delay(str(notification.id))
-consumer.commit(message=msg)
-
-# tasks.py — aquí sí se envía el email
-@shared_task(bind=True, max_retries=3, soft_time_limit=25)
-def send_email_notification(self, notification_id: str):
-    try:
-        send_mail(...)
-        notification.status = NotificationStatus.SENT
-    except Exception as exc:
-        notification.status = NotificationStatus.FAILED
-        raise self.retry(exc=exc, countdown=300)
-```
-
-**WebSocket en audit-service** (Django Channels):
-```python
-from asgiref.sync import async_to_sync
-async_to_sync(channel_layer.group_send)("audit_events", {
-    "type": "audit.event",
-    "payload": AuditEventSerializer(event).data,
-})
-```
+**Puertos nuevos en docker-compose**:
+- Loki: 3100
+- Prometheus: 9090
+- Grafana: 3000 (ya existe el placeholder)
+- Promtail: sin puerto expuesto (sidecar)
 
 ---
 
@@ -161,107 +143,166 @@ async_to_sync(channel_layer.group_send)("audit_events", {
 
 ---
 
-### 🔵 RONDA 1 — Paralelo (sin dependencias entre servicios)
+### 🔵 RONDA 1 — Fundamentos paralelos (sin dependencias entre agentes)
 
-#### Paso 0 — audit-service: core/ + AuditEvent model + migration `[CLAUDE CODE]`
+#### Paso 1 — Configurar structlog JSON en los 4 servicios `[CLAUDE CODE]`
 
-- [x] `audit-service/apps/core/exceptions.py` — `custom_exception_handler` mejorado + `AuditEventNotFoundError`
-- [x] `audit-service/apps/audit/models.py` — modelo `AuditEvent` (UUID PK, event_id UNIQUE, entity_type+entity_id, payload JSONField)
-- [x] Migrations: `0001_initial` + `0002_fix_duplicate_indexes` aplicadas
-- [x] `apps.audit` en `INSTALLED_APPS` (verificado)
+> Aplicar el mismo patrón en `policy-service`, `claims-service`, `notification-service`, `audit-service`.
 
-#### Paso 0b — notification-service: core/ + models + Celery config `[OPENCODE]`
+- [x] `structlog` ya presente en los 4 `pyproject.toml` (no requirió cambio)
+- [x] En cada `config/settings/base.py`: `LOGGING` con `ProcessorFormatter` + `structlog.configure()` + `SERVICE_NAME`
+- [x] `apps/core/logging.py` — creado, luego eliminado (código muerto): `add_service_name` movido como `_add_service_name` inline en `base.py` para evitar import circular
+- [x] `apps/core/middleware.py` — `RequestLoggingMiddleware` añadido (logguea `method`, `path`, `status_code`, `duration_ms`)
+- [x] `RequestLoggingMiddleware` añadido al final de `MIDDLEWARE` en los 4 servicios
+- [x] Ruff limpio en los 4 servicios
+- [x] Verificación: `curl http://localhost:8001/health/` → log JSON en stdout (requiere stack levantado)
 
-- [x] `notification-service/apps/core/exceptions.py` — `custom_exception_handler` + `NotificationNotFoundError`
-- [x] `notification-service/apps/notifications/models.py` — `Notification` + `NotificationLog`
-- [x] `notification-service/config/celery.py` — Celery con `result_expires`, `task_acks_late=True`, `worker_prefetch_multiplier=1`
-- [x] Migrations aplicadas
+#### Paso 1b — Loki + Promtail + Prometheus en docker-compose `[OPENCODE]`
 
----
-
-### 🔵 RONDA 2 — Paralelo (requieren Ronda 1)
-
-#### Paso 1 — audit-service: Serializer + ViewSet + URLs + Admin `[CLAUDE CODE]`
-
-- [x] `audit-service/apps/audit/serializers.py` — `AuditEventSerializer` (detail) + `AuditEventListSerializer` (list)
-- [x] `audit-service/apps/audit/views.py` — `AuditEventViewSet` (solo list+retrieve, filtros por event_type/entity_type/entity_id/kafka_topic/from_date/to_date)
-- [x] `audit-service/apps/audit/urls.py` — `DefaultRouter`, prefix `events/`
-- [x] `audit-service/config/urls.py` — ya incluía `api/audit/` (verificado)
-- [x] `audit-service/apps/audit/admin.py` — django-unfold, todo readonly, sin add/change/delete
-
-#### Paso 2 — notification-service: Celery task + email templates `[OPENCODE]`
-
-- [x] `notification-service/apps/notifications/tasks.py` — `send_email_notification` task (max_retries=3, soft_time_limit=25)
-- [x] `notification-service/templates/notifications/emails/` — 5 templates HTML
-- [x] `notification-service/config/settings/base.py` — `TEMPLATES[0]["DIRS"]` configurado
+- [x] `infra/loki/loki-config.yml` — config mínima single-binary, retention 7 días, filesystem storage
+- [x] `infra/promtail/promtail-config.yml` — scrape de Docker logs, label `service` extraído del nombre del container, parsing JSON con `pipeline_stages.json`
+- [x] `infra/prometheus/prometheus.yml` — scrape jobs para los 4 servicios (`policy-service:8001/metrics`, etc.) cada 15s
+- [x] `infra/docker-compose.yml` — añadir servicios:
+  - `loki` (image `grafana/loki:2.9.x`, port 3100, volume config + data)
+  - `promtail` (image `grafana/promtail:2.9.x`, monta `/var/run/docker.sock` y `/var/lib/docker/containers`, depends_on loki)
+  - `prometheus` (image `prom/prometheus:v2.55.x`, port 9090, volume config + data)
+  - `grafana` (image `grafana/grafana:11.x`, port 3000, env `GF_SECURITY_ADMIN_PASSWORD=admin`, volumes provisioning + dashboards)
+- [x] Configurar `logging.driver: json-file` y `logging.options` (max-size 10m, max-file 3) en los 4 servicios Django + `notification-consumer`, `audit-consumer`, `notification-celery`
+- [x] Verificación: `make infra` levanta todo · `curl http://localhost:3100/ready` · `curl http://localhost:9090/-/ready` · `curl http://localhost:3000/api/health`
 
 ---
 
-### 🔵 RONDA 3 — Paralelo (requieren Ronda 2)
+### 🔵 RONDA 2 — Métricas + Grafana datasources (requiere Ronda 1)
 
-#### Paso 3 — audit-service: Kafka consumer + WebSocket consumer `[CLAUDE CODE]`
+#### Paso 2 — django-prometheus + métricas custom en los 4 servicios `[CLAUDE CODE]`
 
-- [x] `audit-service/apps/audit/services.py` — `AuditService.process_event()` + `_broadcast_to_websocket()`
-- [x] `audit-service/apps/audit/kafka_consumer.py` — `AuditKafkaConsumer` (6 topics, group.id="audit-service", manual commit)
-- [x] `audit-service/apps/audit/management/commands/run_consumer.py`
-- [x] `audit-service/apps/audit/ws_consumers.py` — `AuditEventsConsumer` (AsyncWebsocketConsumer)
-- [x] `audit-service/config/routing.py` — URLRouter con `ws/events/`
-- [x] `audit-service/config/asgi.py` — `ProtocolTypeRouter` (http + websocket)
+- [x] `django-prometheus` ya presente en los 4 `pyproject.toml` (no requirió cambio)
+- [x] `INSTALLED_APPS += ["django_prometheus"]` en los 4 `base.py`
+- [x] `PrometheusBeforeMiddleware` primero, `PrometheusAfterMiddleware` último en los 4
+- [x] `config/urls.py` — `path("", include("django_prometheus.urls"))` en los 4 servicios → expone `/metrics`
+- [x] `apps/core/metrics.py` creado en los 4 servicios con counters/histograms `riskcore_*`
+- [x] `policy-service/apps/policies/services.py` — `policies_created_total` + `policies_cancelled_total` instrumentados
+- [x] `claims-service/apps/claims/services.py` — `claims_filed_total` + `claims_status_changed_total` instrumentados
+- [x] `audit-service/apps/audit/kafka_consumer.py` — counter (ok/duplicate/error) + histogram instrumentados
+- [x] `notification-service/apps/notifications/tasks.py` — counter (sent/failed) + histogram instrumentados
+- [x] Ruff limpio en los 4 servicios
+- [x] Verificación: `curl http://localhost:8001/metrics | grep riskcore_policies_created_total` (requiere stack)
 
-#### Paso 3b — notification-service: Kafka consumer + ViewSet + Admin `[OPENCODE]`
+#### Paso 2b — Grafana datasources + estructura de provisioning `[OPENCODE]`
 
-- [x] `notification-service/apps/notifications/kafka_consumer.py` — `NotificationKafkaConsumer` (5 topics, group.id="notification-service")
-- [x] `notification-service/apps/notifications/management/commands/run_consumer.py`
-- [x] `notification-service/apps/notifications/serializers.py` — `NotificationSerializer` + `NotificationListSerializer`
-- [x] `notification-service/apps/notifications/views.py` — `NotificationViewSet` (list+retrieve, filtros status/event_type)
-- [x] `notification-service/apps/notifications/urls.py` + incluido en `config/urls.py`
-- [x] `notification-service/apps/notifications/admin.py` — django-unfold
-
----
-
-### 🔵 RONDA 4 — Paralelo (requieren Ronda 3)
-
-#### Paso 4 — audit-service: Tests `[CLAUDE CODE]`
-
-- [x] `audit-service/apps/audit/tests/conftest.py` — `AuditEventFactory`
-- [x] `audit-service/apps/audit/tests/test_services.py` — process_event policy/claim, duplicado, fallbacks
-- [x] `audit-service/apps/audit/tests/test_consumers.py` — válido, duplicado, JSON inválido, run() loop
-- [x] `audit-service/apps/audit/tests/test_views.py` — list, retrieve, filtros, 404, 405
-- [x] Cobertura: 29/29 ✅ — `services.py` 97%, `kafka_consumer.py` 95%, `views.py` 100%
-
-#### Paso 4b — notification-service: Tests `[OPENCODE]`
-
-- [x] `notification-service/apps/notifications/tests/conftest.py` — `NotificationFactory`, `NotificationLogFactory`
-- [x] `notification-service/apps/notifications/tests/test_tasks.py` — SENT, FAILED+retry, idempotente
-- [x] `notification-service/apps/notifications/tests/test_consumers.py` — policy.created, claim.filed, commit offset
-- [x] `notification-service/apps/notifications/tests/test_views.py` — list, filter, retrieve, 404
-- [x] Cobertura: 21/21 ✅ — `tasks.py` 100%, `consumers.py` 93%, `views.py` 100%
+- [x] `infra/grafana/provisioning/datasources/datasources.yml` — Loki (http://loki:3100) + Prometheus (http://prometheus:9090) como default
+- [x] `infra/grafana/provisioning/dashboards/dashboards.yml` — provider `file` apuntando a `/etc/grafana/dashboards`
+- [x] `infra/grafana/dashboards/services-overview.json` — Services Overview:
+  - Stat panel: health status de los 4 servicios (query Prometheus `up{job=~".*-service"}`)
+  - Time series: requests/s por servicio (`rate(django_http_requests_total_by_view_transport_method_total[5m])`)
+  - Time series: error rate % por servicio (`rate(django_http_responses_total_by_status[5m])` filtrando 5xx)
+  - Time series: latency p50/p95/p99 (`histogram_quantile` sobre `django_http_requests_latency_seconds_by_view_method`)
+- [x] Verificación: abrir `http://localhost:3000` (admin/admin) → datasources OK → dashboard "Services Overview" carga sin errores
 
 ---
 
-### ✅ Verificación final (ambos agentes)
+### 🔵 RONDA 3 — Logs estructurados específicos + dashboards de dominio (requiere Ronda 2)
+
+#### Paso 3 — Logs estructurados de Kafka consumer + Celery `[CLAUDE CODE]`
+
+- [x] `audit-service/apps/audit/kafka_consumer.py`:
+  - `kafka_message_received` con `topic`, `partition`, `offset`, `event_type`
+  - `kafka_message_processed` con `processing_time_ms`
+  - `kafka_message_duplicate` con `event_id`, `topic`, `offset`
+  - `kafka_message_failed` con `exc_info=True`
+  - `bind_contextvars(event_id=...)` al inicio + `unbind_contextvars` en `finally`
+- [x] `notification-service/apps/notifications/kafka_consumer.py` — mismo patrón (kafka_message_received/processed/duplicate/failed + processing_time_ms + exc_info=True)
+- [x] `notification-service/apps/notifications/tasks.py`:
+  - `celery_task_started` con `task_name`, `task_id`, `notification_id`, `event_type`, `attempt`
+  - `celery_task_succeeded` con `duration_ms`, `recipient`, `attempt`
+  - `celery_task_retry` con `next_retry_in=300`, `error`
+  - `celery_task_failed` con `exc_info=True` (solo en último intento)
+- [x] No hay `print()` ni formato legacy — todo usa structlog con kwargs
+
+#### Paso 3b — Dashboards Kafka + Celery + Business `[OPENCODE]`
+
+- [x] `infra/grafana/dashboards/kafka.json`:
+  - Producer rate por topic (`rate(riskcore_kafka_messages_processed_total[5m])` agrupado por `topic`)
+  - Processing duration p95 (`histogram_quantile(0.95, riskcore_kafka_processing_duration_seconds_bucket)`)
+  - Logs panel (Loki): `{service="audit-service"} | json | event=~"kafka_.*"` últimos 15 min
+- [x] `infra/grafana/dashboards/celery.json`:
+  - Tasks por estado (counter `riskcore_notifications_sent_total` agrupado por `status`)
+  - Duración promedio task (`histogram_quantile` sobre `riskcore_celery_task_duration_seconds`)
+  - Tasa de éxito/fallo (24h) — gauge
+  - Logs panel: `{service="notification-service"} | json | event=~"celery_.*"`
+- [x] `infra/grafana/dashboards/business.json`:
+  - Pólizas creadas/hora (`increase(riskcore_policies_created_total[1h])`)
+  - Siniestros por estado (pie chart con `riskcore_claims_status_changed_total` agrupado por `to_status`)
+  - Notificaciones enviadas/hora por `event_type`
+- [x] Verificación: los 4 dashboards (services-overview + 3 nuevos) cargan automáticamente al levantar Grafana
+
+---
+
+### 🔵 RONDA 4 — Tests + alertas (requiere Ronda 3)
+
+#### Paso 4 — Tests de instrumentación en los 4 servicios `[CLAUDE CODE]`
+
+- [x] `policy-service/apps/policies/tests/test_metrics.py`: crear póliza → `GET /metrics` → assert `riskcore_policies_created_total{policy_type="VIDA"} >= 1`
+- [x] `claims-service/apps/claims/tests/test_metrics.py`: filar claim → metrics expone counter incrementado
+- [x] `audit-service/apps/audit/tests/test_metrics.py`: process_event → `riskcore_kafka_messages_processed_total{topic="policy.created",result="ok"} >= 1`
+- [x] `notification-service/apps/notifications/tests/test_metrics.py`: ejecutar task → counter `riskcore_notifications_sent_total` incrementado
+- [x] `apps/core/tests/test_logging.py` (uno por servicio): capturar log → parsear JSON → assert keys `timestamp`, `level`, `service`, `event`, `request_id`
+- [x] `apps/core/tests/test_middleware.py` (uno por servicio): request_id generado/propagado, clear_contextvars antes de bind
+- [x] Cobertura mantenida: policy 93% · claims 92% · audit 95% · notification 97%
+- [x] Suite completa verde: 49 + 53 + 45 + 36 = 183 tests, 0 fallos
+
+#### Paso 4b — Alertas Grafana + verificación end-to-end `[OPENCODE]`
+
+- [x] `infra/grafana/provisioning/alerting/rules.yml` (Grafana unified alerting):
+  - `HighErrorRate` — error rate > 5% en cualquier servicio durante 2 min
+  - `KafkaConsumerLag` — consumer lag > 1000 mensajes durante 5 min (usar `kafka_consumer_lag` si está expuesto, o métrica custom)
+  - `CeleryQueueBacklog` — `celery_tasks_pending > 500` durante 2 min
+  - `ServiceDown` — `up{job=~".*-service"} == 0` durante 30s
+- [x] `infra/grafana/provisioning/alerting/contact-points.yml` — contact point por defecto (puede ser webhook/email dummy en local)
+- [x] Documentar en `infra/README.md` cómo cargan los dashboards y datasources
+- [x] Actualizar `Makefile`: añadir `make logs-loki` (consulta logs vía LogQL desde CLI con logcli) si es trivial
+- [x] Verificación final end-to-end (ver bloque debajo)
+
+---
+
+### ✅ Verificación final (ambos agentes — solo después de Ronda 4)
 
 ```bash
-# Levantar todo el stack
-docker compose -f infra/docker-compose.yml up -d
+# 1. Levantar todo el stack
+make dev
 
-# Crear póliza → verifica que audit-service la registra
+# 2. Health de la pipeline de observabilidad
+curl http://localhost:3100/ready                          # Loki OK
+curl http://localhost:9090/-/ready                        # Prometheus OK
+curl http://localhost:3000/api/health                     # Grafana OK
+
+# 3. Endpoints /metrics de los 4 servicios
+for p in 8001 8002 8003 8004; do curl -s http://localhost:$p/metrics | head -3; done
+
+# 4. Generar tráfico
 curl -X POST http://localhost:8001/api/policies/customers/ \
   -H "Content-Type: application/json" \
   -d '{"full_name":"Test","email":"test@test.com","dni":"12345678A"}'
+# (crear póliza, claim, transición — ver verificación de Fase 3)
 
-# Verificar AuditEvent en audit-service
-curl http://localhost:8004/api/audit/events/?event_type=policy.created
+# 5. Verificar métricas custom
+curl -s http://localhost:8001/metrics | grep riskcore_policies_created_total
+curl -s http://localhost:8004/metrics | grep riskcore_kafka_messages_processed_total
 
-# Verificar Notification en notification-service
-curl http://localhost:8003/api/notifications/notifications/
+# 6. Verificar logs en Loki (vía API)
+curl -s 'http://localhost:3100/loki/api/v1/query?query={service="policy-service"}' | jq '.data.result | length'
 
-# Tests
-cd audit-service && uv run pytest --cov=apps/audit -v
-cd notification-service && uv run pytest --cov=apps/notifications -v
+# 7. Grafana: abrir y validar
+open http://localhost:3000   # admin/admin
+# - Datasources: Loki + Prometheus en verde
+# - 4 dashboards cargados (services-overview, kafka, celery, business)
+# - Eventos generados en paso 4 visibles en business dashboard
+# - Logs visibles en panel Loki de kafka.json
 
-# WebSocket (en segunda terminal)
-wscat -c ws://localhost:8004/ws/events/
+# 8. Tests
+for s in policy-service claims-service audit-service notification-service; do
+  cd $s && uv run pytest --cov=apps -v && cd ..
+done
 ```
 
 ---
@@ -274,8 +315,8 @@ wscat -c ws://localhost:8004/ws/events/
 | 0 | Setup e Infraestructura | ✅ Completado |
 | 1 | policy-service | ✅ Completado |
 | 2 | claims-service | ✅ Completado |
-| 3 | audit-service + notification-service | ⏳ En curso |
-| 4 | Observabilidad | ❌ No iniciado |
+| 3 | audit-service + notification-service | ✅ Completado |
+| 4 | Observabilidad | ✅ Completado |
 | 5 | Gateway + Rate Limiting | ❌ No iniciado |
 | 6 | Load Testing | ❌ No iniciado |
 | 7 | Frontend Dashboard | ❌ No iniciado |
@@ -301,6 +342,7 @@ wscat -c ws://localhost:8004/ws/events/
 - ✅ claims-service: models, serializers, services, PolicyServiceClient, views, Kafka events, admin, tests (39 tests, 96% services, 100% views)
 - ✅ audit-service: AuditEvent model, API (list+retrieve+filtros), Kafka consumer, WebSocket, tests (29 tests, 97% services, 95% consumer)
 - ✅ notification-service: Notification+NotificationLog models, Celery task, email templates, Kafka consumer, API, tests (21 tests, 100% tasks, 93% consumer)
+- ✅ Observabilidad: structlog JSON en 4 servicios, Loki + Promtail + Prometheus + Grafana, 4 dashboards (Services Overview, Kafka, Celery, Business), 4 alert rules, /metrics expuestos, logs Kafka y Loki verificados end-to-end
 
 ---
 
@@ -370,19 +412,22 @@ _Ninguno por ahora._
 3. **Archivos compartidos** (`docker-compose.yml`, `Makefile`, `CLAUDE.md`) → solo los modifica el agente cuya tarea lo requiere explícitamente
 4. **Orden de merge**: el agente que empezó primero mergea primero. El segundo hace rebase después.
 
-### Agentes activos — Fase 3
+### Agentes activos — Fase 4
 
-| Agente | Servicio | Tareas asignadas |
+| Agente | Área | Tareas asignadas |
 |---|---|---|
-| **Claude Code** | audit-service (8004) | Paso 0 → Paso 1 → Paso 3 → Paso 4 |
-| **OpenCode** | notification-service (8003) | Paso 0b → Paso 2 → Paso 3b → Paso 4b |
+| **Claude Code** | Código de los 4 servicios Django (instrumentación) | Paso 1 → Paso 2 → Paso 3 → Paso 4 |
+| **OpenCode** | Infra de observabilidad (Loki/Prometheus/Grafana) | Paso 1b → Paso 2b → Paso 3b → Paso 4b |
 
 ### División de archivos — quién toca qué
 
 | Área | Agente |
 |---|---|
-| `audit-service/` — todo | **Claude Code** |
-| `notification-service/` — todo | **OpenCode** |
+| `policy-service/`, `claims-service/`, `notification-service/`, `audit-service/` (settings, middleware, services, consumers, tasks, tests) | **Claude Code** |
+| `infra/loki/`, `infra/promtail/`, `infra/prometheus/`, `infra/grafana/` (configs + dashboards JSON + provisioning) | **OpenCode** |
+| `infra/docker-compose.yml` | **OpenCode** (añade Loki/Promtail/Prometheus/Grafana + logging drivers) |
+| `Makefile` | **OpenCode** si añade targets de observabilidad |
+| `pyproject.toml` de los 4 servicios | **Claude Code** (añade structlog + django-prometheus) |
 
 ### Resolución de conflictos
 
