@@ -8,7 +8,9 @@
       "Read(//mnt/c/Users/lucas/**)",
       "Bash(cmd.exe /c \"dir C:\\\\Users\\\\lucas\\\\Desktop\\\\*.md\")",
       "Bash(cmd.exe /c \"dir C:\\\\Users\\\\lucas\\\\Desktop\\\\*.md /b 2>nul & dir C:\\\\Users\\\\lucas\\\\Desktop\\\\risk-core\\\\iniciar-proyecto.md /b 2>nul\")",
-      "Bash(uv run *)"
+      "Bash(uv run *)",
+      "Bash(git mv *)",
+      "Bash(ls \"C:/Users/lucas/Desktop/codigos_servibles/\" 2>&1)"
     ]
   }
 }

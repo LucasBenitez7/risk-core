@@ -1,60 +1,21 @@
 # RiskCore — Rules for Cline / OpenCode Agents
 
-> **This file is a lean reference.** Full rules, stack versions, and patterns are in `CLAUDE.md`.
-> If anything here conflicts with `CLAUDE.md`, `CLAUDE.md` wins.
->
-> **SYNC WARNING**: When updating rules in `CLAUDE.md`, verify this file is still aligned.
-> Last synced with CLAUDE.md: 2026-05-06.
+> This file is auto-loaded by Cline / OpenCode at session start.
+> Project rules live elsewhere.
 
----
+## Read first, in this order
 
-## First Steps — Every Session
+1. **`CONTEXT.md`** — current state, active phase, plan with checkboxes, phase-specific rules. **ALWAYS read first.**
+2. **`AGENTS.md`** — permanent project rules, stack, patterns, ways of working, "NEVER do this", Git workflow, PR format.
 
-1. Read `CONTEXT.md` — current state, active phase, plan, and rules
-2. Read `CLAUDE.md` — full project rules, stack, patterns, and conventions
-3. Check which service/area you are assigned to (CONTEXT.md Section 11)
+`AGENTS.md` is the source of truth for rules. This file is just the entry point for Cline / OpenCode (follows the open [agents.md](https://agents.md) convention).
 
----
+## Minimum rules you cannot skip (full detail in `AGENTS.md`)
 
-## Critical Rules (always apply)
+- **NEVER** `git commit` or `git push` without explicit user permission
+- Business logic in `services.py`, never in `views.py`
+- `confluent-kafka` never `kafka-python` · `uv` never `pip` · `Ruff` never `flake8`/`black` · `pnpm` never `npm`/`yarn`
+- Self-audit mandatory before the tests step (see §"Self-Audit" in AGENTS.md)
+- PR title and description always in **English**, formatted for copy-paste into GitHub (see §"Pull Requests" in AGENTS.md)
 
-1. **NEVER `git commit` or `git push` without explicit user confirmation**
-2. Read-only git OK without asking: `status`, `diff`, `log`, `branch`, `stash`
-3. Business logic ALWAYS in `services.py`, never in views
-4. Use `confluent-kafka`, never `kafka-python`
-5. Use `uv` for packages, never `pip install` or `requirements.txt`
-6. Use `Ruff` for linting, never `flake8` or `black`
-7. Use `pnpm` for frontend, never `npm` or `yarn`
-8. AuditEvent is append-only (regulatory) — never UPDATE or DELETE
-9. No database sharing between services
-10. Emails via Celery tasks, never in Kafka consumers directly
-11. Environment variables via `python-decouple`, never hardcoded
-12. Tests alongside the feature, never deferred to end of phase
-
-## Instruction Priority
-
-```
-1. CONTEXT.md       <- state + active phase rules (ALWAYS first)
-2. CLAUDE.md        <- full project rules and patterns
-3. This file        <- quick reference for Cline/OpenCode
-4. docs/            <- detailed reference (read when needed)
-5. .agents/skills/  <- generic patterns (project rules override)
-```
-
-## Architecture (quick reference)
-
-| Service | Port | Role |
-|---|---|---|
-| policy-service | 8001 | Customers and policies |
-| claims-service | 8002 | Claims lifecycle |
-| notification-service | 8003 | Async email via Celery |
-| audit-service | 8004 | Immutable event log + WebSocket |
-
-Communication: Kafka async by default. Only sync HTTP: claims -> policy (verify).
-
-## For Everything Else
-
-- Stack versions, Kafka topics, error format, event schema, git conventions, PR format, testing patterns, business rules, service structure -> see `CLAUDE.md`
-- Phase checklists and entregables -> see `docs/PHASES.md`
-- API schemas -> see `docs/API_DESIGN.md`
-- Domain context -> see `docs/GUIA_PROYECTO.md`
+## For everything else → `AGENTS.md`
