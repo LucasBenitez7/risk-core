@@ -1,5 +1,6 @@
 import uuid
 
+import structlog
 from django.db import transaction
 
 from apps.core.exceptions import (
@@ -7,7 +8,10 @@ from apps.core.exceptions import (
     InvalidPolicyStatusError,
     PolicyNotFoundError,
 )
+from apps.core.metrics import policies_cancelled_total, policies_created_total
 from apps.policies.models import Coverage, Customer, Policy
+
+logger = structlog.get_logger()
 
 
 def _get_producer():
@@ -62,6 +66,13 @@ class PolicyService:
                 Coverage.objects.bulk_create(coverages)
 
         _get_producer().produce_policy_created(policy)
+        policies_created_total.labels(policy_type=policy.policy_type).inc()
+        logger.info(
+            "policy_created",
+            policy_id=str(policy.id),
+            policy_type=policy.policy_type,
+            customer_id=str(policy.customer_id),
+        )
         return policy
 
     def cancel_policy(self, policy: Policy, reason: str) -> Policy:
@@ -85,6 +96,12 @@ class PolicyService:
             policy.save(update_fields=["status", "cancellation_reason", "updated_at"])
 
         _get_producer().produce_policy_cancelled(policy)
+        policies_cancelled_total.inc()
+        logger.info(
+            "policy_cancelled",
+            policy_id=str(policy.id),
+            policy_type=policy.policy_type,
+        )
         return policy
 
     def update_policy(self, policy: Policy, data: dict) -> Policy:

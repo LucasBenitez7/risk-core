@@ -262,13 +262,16 @@ wheels = [
 
 [[package]]
 name = "django-prometheus"
-version = "0.2.2"
+version = "2.4.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "pip-prometheus" },
+    { name = "django" },
     { name = "prometheus-client" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/14/b7/6abe443d08f34a4f7df7f86f44ffe9526e0e40c2d6a71636c6a4fe84d94f/django-prometheus-0.2.2.tar.gz", hash = "sha256:3e4a29a8bfbb653c18c721ad73639299e2e6d872af11d1ce3d0971dd15567ef0", size = 7795, upload-time = "2015-07-02T17:50:10.93Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/98/f4/cb39ddd2a41e07a274c4e162c076e906ae232d63b66bbabdea0300878877/django_prometheus-2.4.1.tar.gz", hash = "sha256:073628243d2a6de6a8a8c20e5b512872dfb85d66e1b60b28bcf1eca0155dad95", size = 24464, upload-time = "2025-06-25T15:45:37.149Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/01/50/9c5e022fa92574e5d20606687f15a2aa255e10512a17d11a8216fa117f72/django_prometheus-2.4.1-py2.py3-none-any.whl", hash = "sha256:7fe5af7f7c9ad9cd8a429fe0f3f1bf651f0e244f77162147869eab7ec09cc5e7", size = 29541, upload-time = "2025-06-25T15:45:35.433Z" },
+]
 
 [[package]]
 name = "django-stubs"
@@ -574,7 +577,6 @@ dependencies = [
     { name = "djangorestframework" },
     { name = "djangorestframework-simplejwt" },
     { name = "drf-spectacular" },
-    { name = "prometheus-client" },
     { name = "psycopg", extra = ["binary"] },
     { name = "python-decouple" },
     { name = "redis" },
@@ -606,7 +608,7 @@ requires-dist = [
     { name = "django", specifier = ">=5.2,<5.3" },
     { name = "django-cors-headers", specifier = ">=4.9,<4.10" },
     { name = "django-health-check", specifier = ">=4.2,<4.3" },
-    { name = "django-prometheus", specifier = ">=0.2,<0.3" },
+    { name = "django-prometheus", specifier = ">=2.3,<2.5" },
     { name = "django-stubs", marker = "extra == 'dev'", specifier = ">=6.0,<6.1" },
     { name = "django-unfold", specifier = ">=0.89,<0.90" },
     { name = "djangorestframework", specifier = ">=3.15,<3.16" },
@@ -615,7 +617,6 @@ requires-dist = [
     { name = "factory-boy", marker = "extra == 'dev'", specifier = ">=3.3,<3.4" },
     { name = "faker", marker = "extra == 'dev'", specifier = ">=40.0,<41.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.20,<1.21" },
-    { name = "prometheus-client", specifier = "<0.18" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.3,<3.4" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.0,<10.0" },
     { name = "pytest-django", marker = "extra == 'dev'", specifier = ">=4.12,<4.13" },
@@ -645,28 +646,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/5a/82/42f767fc1c1143d6fd36efb827202a2d997a375e160a71eb2888a925aac1/pathspec-1.1.1.tar.gz", hash = "sha256:17db5ecd524104a120e173814c90367a96a98d07c45b2e10c2f3919fff91bf5a", size = 135180, upload-time = "2026-04-27T01:46:08.907Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f1/d9/7fb5aa316bc299258e68c73ba3bddbc499654a07f151cba08f6153988714/pathspec-1.1.1-py3-none-any.whl", hash = "sha256:a00ce642f577bf7f473932318056212bc4f8bfdf53128c78bbd5af0b9b20b189", size = 57328, upload-time = "2026-04-27T01:46:07.06Z" },
-]
-
-[[package]]
-name = "pip"
-version = "26.1.1"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/b6/48/cb9b7a682f6fe01a4221e1728941dd4ac3cd9090a17db3779d6ff490b602/pip-26.1.1.tar.gz", hash = "sha256:d36762751d156a4ee895de8af39aa0abeeeb577f93a2eca6ab62467bbf0f8a78", size = 1840400, upload-time = "2026-05-04T19:02:21.248Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/3a/eb/fea4d1d51c49832120f7f285d07306db3960f423a2612c6057caf3e8196f/pip-26.1.1-py3-none-any.whl", hash = "sha256:99cb1c2899893b075ff56e4ed0af55669a955b49ad7fb8d8603ecdaf4ed653fb", size = 1812777, upload-time = "2026-05-04T19:02:18.9Z" },
-]
-
-[[package]]
-name = "pip-prometheus"
-version = "1.2.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "pip" },
-    { name = "prometheus-client" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/c1/df/0b3d5ba693a629991e370e286449be2b81d0534912c6cf090eddb235a138/pip-prometheus-1.2.1.tar.gz", hash = "sha256:155e547b0fdfebe3a28d4db75380b5cef2c8089da66d56cdcd84be867c9bda39", size = 2194, upload-time = "2019-09-21T16:13:15.109Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/f7/d1/bb16025e9d53ee984960968c076342149e9b457c4e7e4f2b639b246ac6fc/pip_prometheus-1.2.1-py3-none-any.whl", hash = "sha256:9bc98100415079232f699674a2bed5171bdd979754e8fe32b50142c096f541db", size = 6343, upload-time = "2019-09-21T16:13:13.985Z" },
 ]
 
 [[package]]

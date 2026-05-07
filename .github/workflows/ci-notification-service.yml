@@ -53,6 +53,9 @@ jobs:
       - name: Mypy
         working-directory: notification-service
         run: uv run mypy . --ignore-missing-imports || true
+      - name: Bandit
+        working-directory: notification-service
+        run: uv run bandit -r apps/ -ll
       - name: Pytest
         working-directory: notification-service
         env:
@@ -63,4 +66,4 @@ jobs:
           DB_HOST: localhost
           DB_PORT: 5432
           REDIS_URL: redis://localhost:6379/0
-        run: uv run pytest
+        run: uv run pytest --cov=apps --cov-report=term-missing

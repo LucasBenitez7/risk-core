@@ -1,4 +1,4 @@
-.PHONY: dev infra test lint kafka-setup logs shell help
+.PHONY: dev infra test lint kafka-setup logs logs-loki shell help
 
 # ─── Default ─────────────────────────────────────────
 help:
@@ -10,6 +10,7 @@ help:
 	@echo "  make lint             Run ruff + mypy across all services"
 	@echo "  make kafka-setup      Create all 6 Kafka topics"
 	@echo "  make logs s=<svc>     Tail logs for a service (s=claims)"
+	@echo "  make logs-loki svc=<svc> Query JSON logs from Loki (svc=policy)"
 	@echo "  make shell s=<svc>    Django shell for a service (s=audit)"
 
 # ─── Docker Compose ──────────────────────────────────
@@ -17,7 +18,7 @@ dev:
 	docker compose -f infra/docker-compose.yml up -d
 
 infra:
-	docker compose -f infra/docker-compose.yml up -d postgres redis kafka grafana loki prometheus
+	docker compose -f infra/docker-compose.yml up -d postgres redis kafka loki promtail prometheus grafana
 
 # ─── Testing ─────────────────────────────────────────
 test:
@@ -42,3 +43,7 @@ logs:
 # ─── Shell ──────────────────────────────────────────
 shell:
 	docker compose -f infra/docker-compose.yml exec $(s)-web uv run python manage.py shell
+
+# ─── Loki Logs ──────────────────────────────────────
+logs-loki:
+	@curl -s "http://localhost:3100/loki/api/v1/query_range?query={service=\"$(svc)-service\"}&limit=50" | python -m json.tool

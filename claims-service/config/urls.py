@@ -6,6 +6,7 @@ from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from apps.core.views import HealthCheckView
 
 urlpatterns = [
+    path("", include("django_prometheus.urls")),
     path("admin/", admin.site.urls),
     path("health/", HealthCheckView.as_view(), name="health"),
     path("api/claims/", include("apps.claims.urls")),

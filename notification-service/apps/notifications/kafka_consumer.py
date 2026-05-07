@@ -1,4 +1,5 @@
 import json
+import time
 
 import structlog
 from confluent_kafka import Consumer, KafkaError
@@ -97,14 +98,25 @@ class NotificationKafkaConsumer:
             )
             return
 
+        topic = msg.topic()
         event_type = payload.get("event_type", "")
         event_id = payload.get("event_id", "")
         data = payload.get("data", {})
+
+        structlog.contextvars.bind_contextvars(event_id=event_id)
+        logger.info(
+            "kafka_message_received",
+            topic=topic,
+            partition=msg.partition(),
+            offset=msg.offset(),
+            event_type=event_type,
+        )
 
         recipient = _extract_recipient(data, event_type)
         subject = _build_subject(event_type, data)
         context = _build_context(event_type, data)
 
+        start = time.perf_counter()
         try:
             with transaction.atomic():
                 notification = Notification.objects.create(
@@ -116,27 +128,34 @@ class NotificationKafkaConsumer:
                 )
                 send_email_notification.delay(str(notification.id))
             self.consumer.commit(message=msg)
+            duration = time.perf_counter() - start
 
             logger.info(
-                "notification_created",
-                notification_id=str(notification.id),
+                "kafka_message_processed",
+                topic=topic,
+                offset=msg.offset(),
                 event_type=event_type,
-                event_id=event_id,
-                topic=msg.topic(),
+                notification_id=str(notification.id),
+                processing_time_ms=round(duration * 1000, 2),
             )
         except IntegrityError:
+            self.consumer.commit(message=msg)
             logger.warning(
-                "duplicate_event",
+                "kafka_message_duplicate",
                 event_id=event_id,
                 event_type=event_type,
-                topic=msg.topic(),
+                topic=topic,
+                offset=msg.offset(),
             )
-            self.consumer.commit(message=msg)
         except Exception as exc:
             logger.error(
-                "notification_creation_failed",
+                "kafka_message_failed",
                 event_type=event_type,
                 event_id=event_id,
-                topic=msg.topic(),
+                topic=topic,
+                offset=msg.offset(),
                 error=str(exc),
+                exc_info=True,
             )
+        finally:
+            structlog.contextvars.unbind_contextvars("event_id")

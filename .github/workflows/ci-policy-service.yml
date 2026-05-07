@@ -44,6 +44,9 @@ jobs:
       - name: Mypy
         working-directory: policy-service
         run: uv run mypy . --ignore-missing-imports || true
+      - name: Bandit
+        working-directory: policy-service
+        run: uv run bandit -r apps/ -ll
       - name: Pytest
         working-directory: policy-service
         env:
@@ -53,4 +56,4 @@ jobs:
           DB_PASSWORD: postgres
           DB_HOST: localhost
           DB_PORT: 5432
-        run: uv run pytest
+        run: uv run pytest --cov=apps --cov-report=term-missing
