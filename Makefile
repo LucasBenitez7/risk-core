@@ -1,8 +1,10 @@
-.PHONY: dev infra test lint kafka-setup logs logs-loki shell help
+.PHONY: dev infra test lint kafka-setup logs logs-loki shell gateway-test help
 
 # ─── Default ─────────────────────────────────────────
 help:
 	@echo "RiskCore — Development Commands"
+	@echo ""
+	@echo "  make help              Show this help"
 	@echo ""
 	@echo "  make dev              Start full stack (Docker Compose)"
 	@echo "  make infra            Start only infrastructure (Kafka + Redis + PG + Grafana)"
@@ -12,6 +14,7 @@ help:
 	@echo "  make logs s=<svc>     Tail logs for a service (s=claims)"
 	@echo "  make logs-loki svc=<svc> Query JSON logs from Loki (svc=policy)"
 	@echo "  make shell s=<svc>    Django shell for a service (s=audit)"
+	@echo "  make gateway-test     Run gateway integration test suite"
 
 # ─── Docker Compose ──────────────────────────────────
 dev:
@@ -47,3 +50,7 @@ shell:
 # ─── Loki Logs ──────────────────────────────────────
 logs-loki:
 	@curl -s "http://localhost:3100/loki/api/v1/query_range?query={service=\"$(svc)-service\"}&limit=50" | python -m json.tool
+
+# ─── Gateway ────────────────────────────────────────
+gateway-test:
+	cd gateway && bash test.sh

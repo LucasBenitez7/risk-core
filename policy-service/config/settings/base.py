@@ -26,6 +26,7 @@ INSTALLED_APPS = [
     # Local
     "apps.core",
     "apps.policies",
+    "apps.auth.apps.AuthConfig",
 ]
 
 MIDDLEWARE = [
