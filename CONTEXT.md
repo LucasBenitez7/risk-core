@@ -39,97 +39,101 @@ Permitido sin pedir permiso: `git status`, `git diff`, `git log`, `git branch`, 
 ---
 
 <a id="s2"></a>
-## 2. ⚠️ Reglas críticas — fase actual (Fase 4: observabilidad)
+## 2. ⚠️ Reglas críticas — fase actual (Fase 5: gateway + rate limiting)
 
 > Estas reglas cambian según la fase. Reemplazar completo al iniciar una fase nueva.
 > Ver tabla de reglas por fase en [Sección 10](#s10).
 
-1. **Logs en JSON con structlog — nunca `print()` ni `logging.info()` con formato libre**. Toda salida estructurada vía `structlog.get_logger()`. Cada log debe ser parseable como JSON por Loki sin transformaciones.
+1. **Rate limiting SOLO en Nginx — nunca en Django**. Si te tienta poner `django-ratelimit` o un decorador throttle de DRF: no. El gateway frena el tráfico antes de tocar Python. Cualquier propuesta de rate limiting en código de servicio es bug.
 
-2. **`request_id` se propaga vía middleware — NUNCA pasarlo manualmente como parámetro**. `RequestIDMiddleware` ya hace `structlog.contextvars.bind_contextvars(request_id=...)`. Cualquier `logger.info(...)` dentro del request lo incluye automáticamente. No agregar `request_id=...` a mano salvo en consumers/tasks (donde no hay request HTTP).
+2. **JWT validado SOLO en el gateway**. Los servicios Django confían en el gateway y no re-validan el token. La validación se hace via `auth_request` de Nginx contra un endpoint de verify expuesto por `policy-service`. No duplicar la validación en cada servicio.
 
-3. **Campos obligatorios en cada log**: `timestamp`, `level`, `service`, `event` (snake_case del nombre del log), `request_id` (auto vía middleware en HTTP). No agregar campos redundantes como `module`/`logger_name` — structlog ya los incluye.
+3. **Tiers de rate limit — exactos** (ver `docs/TECHNICAL_DECISIONS.md` §9):
+   - Sin auth → `20r/m` por IP (zona `api_anon`)
+   - Con JWT → `200r/m` por token (zona `api_auth`, key = `$http_authorization`)
+   - Whitelist de IPs admin → sin límite
+   En producción `api_auth` baja a `60r/m` (free tier Upstash).
 
-4. **`/metrics` endpoint expuesto en cada servicio Django** vía `django-prometheus`. En producción (Fase 5) se protegerá con IP whitelist en el gateway. En desarrollo abierto. URL: `/metrics` (no `/api/metrics/`).
+4. **`X-Request-ID` se genera en el gateway**. Nginx usa `$request_id` (UUID auto) y lo propaga como header `X-Request-ID` a todos los upstreams. El middleware Django ya lo respeta si viene en el request — no tocar `RequestIDMiddleware`.
 
-5. **Métricas de negocio nombradas con prefijo `riskcore_`**. Ejemplos: `riskcore_policies_created_total`, `riskcore_claims_filed_total`, `riskcore_kafka_messages_processed_total`, `riskcore_notifications_sent_total`. Nunca `django_*` (ya existen) ni nombres genéricos.
+5. **`/metrics` con IP whitelist en el gateway**. En desarrollo accesible; en la config de producción/staging del gateway, `/metrics/policy/`, `/metrics/claims/`, etc., solo desde IPs internas (`allow 10.0.0.0/8; deny all;`). Nunca exponer público.
 
-6. **Dashboards Grafana versionados como JSON** en `infra/grafana/dashboards/`. Nada se configura por UI — todo provisioning automático vía `infra/grafana/provisioning/`. Si tocás un dashboard en la UI, exportá el JSON y commitéalo.
+6. **Logs de acceso del gateway en JSON → Loki**. Formato `log_format` custom con `request_id`, `status`, `upstream_response_time`, `request_time`, `limit_req_status`. Promtail lo scrapea igual que el resto de servicios. Nada de logs en formato Combined estándar.
 
-7. **Logs de Kafka consumer obligatorios**: cada `process_event` debe loguear `topic`, `partition`, `offset`, `event_type`, `processing_time_ms`. Errores con `exc_info=True` para que el stack trace llegue a Loki.
+7. **Errores en formato del proyecto**. 401, 429, 502, 503 deben responder JSON con la estructura estándar `{"error": {"code": "...", "message": "..."}, "request_id": "..."}`. Nginx usa `error_page` + `internal` location con `default_type application/json` y `return` con cuerpo construido.
 
-8. **Logs de Celery tasks obligatorios** (notification-service): `task_name`, `task_id`, `status` (`started`/`success`/`failed`/`retry`), `duration_ms`, `attempt` (en retries).
+8. **Endpoint de verify JWT en `policy-service`** (no nuevo servicio): `GET /api/auth/verify/` que devuelve 200 si el JWT es válido, 401 si no. Lo consume `auth_request` de Nginx. Se implementa con `simplejwt` (ya instalado).
 
-9. **Tests de instrumentación**: cada servicio debe tener al menos un test que verifique que `/metrics` responde 200 con un counter custom incrementado tras una operación. No mockear prometheus.
+9. **Self-audit obligatorio antes de tests** (regla permanente, ver CLAUDE.md §"Self-Audit"). Cada agente revisa SU propio trabajo de la fase antes del paso de tests: bugs, errores silenciosos, duplicación, malas prácticas, código muerto, consistencia, `ruff` / `nginx -t` limpios. Hallazgos se arreglan en el momento.
+
+10. **No tocar el código de los 4 servicios Django excepto para añadir el endpoint de verify**. Toda la lógica de gateway vive en `gateway/`. Si necesitás cambiar más allá del verify endpoint, parar y consultar.
 
 ---
 
 <a id="s3"></a>
 ## 3. Estado actual
 
-**Fase**: 4 — Observabilidad
-**Rama activa**: `feat/phase-4-observability`
-**Última tarea completada**: Fase 4 completa — verificación end-to-end pasada ✅
-**Próximo paso**: Pendiente confirmación del usuario para commits
+**Fase**: 5 — Gateway + Rate Limiting
+**Rama activa**: `feat/phase-5-gateway`
+**Última tarea completada**: Fase 5 completa ✅ — todos los pasos (1+1b+2+2b+3+3b+4+4b) verificados. 11/11 tests pass.
+**Próximo paso**: Fase 6 (Load Testing) — esperar a que el usuario decida si crear PR para Fase 5
 
 ---
 
 <a id="s4"></a>
-## 4. Plan detallado — Fase 4 (Observabilidad)
+## 4. Plan detallado — Fase 5 (Gateway + Rate Limiting)
 
-> Este plan es editable por cualquier agente. Marcar `[x]` al completar cada paso.
-> Rama: `feat/phase-4-observability` | Scope commits: `infra`, `policy`, `claims`, `notifications`, `audit`
-> **Dos agentes en paralelo: Claude Code = código (los 4 servicios) · OpenCode = infra (Loki/Prometheus/Grafana).**
+> Plan editable por cualquier agente. Marcar `[x]` al completar cada paso.
+> Rama: `feat/phase-5-gateway` | Scope commits: `gateway`, `infra`, `policy`
+> **Dos agentes en paralelo: Claude Code = Nginx + verify endpoint Django · OpenCode = docker-compose + Promtail + Grafana dashboard.**
 
 ---
 
 ### Contexto de dominio — leer antes de empezar
 
-**Pipeline de observabilidad que construye esta fase:**
+**Pipeline final tras Fase 5:**
 
 ```
-[4 servicios Django] ──JSON logs (stdout)──▶ [Promtail] ──▶ [Loki] ──┐
-[4 servicios Django] ──/metrics──────▶ [Prometheus]──────────────────┤
-                                                                     ├──▶ [Grafana] (dashboards + alerts)
-[Celery worker]      ──JSON logs (stdout)──▶ [Promtail] ──▶ [Loki] ──┘
+[client] ──HTTP──▶ [gateway:80 (Nginx)] ─┬─▶ policy-service:8001
+                       │                  ├─▶ claims-service:8002
+                       │                  ├─▶ notification-service:8003
+                       │                  └─▶ audit-service:8004
+                       │
+                       ├─ JWT verify ──▶ policy-service:/api/auth/verify/ (auth_request)
+                       ├─ rate limit  ──▶ 429 si excede (zona api_anon o api_auth)
+                       ├─ X-Request-ID ──▶ propagado a upstream
+                       └─ access logs JSON ──▶ Promtail ──▶ Loki
 ```
 
-**Stack a añadir** (todas versiones del CLAUDE.md):
-- `structlog 25.x` — ya está en el middleware, falta configurarlo en `LOGGING` y processors
-- `django-prometheus 0.3.x` — middleware + `/metrics` endpoint + métricas DB/cache
-- `prometheus-client` (transitivo) — para counters custom de negocio
-- Loki 2.9.x · Promtail 2.9.x · Prometheus 2.55.x · Grafana 11.x (Docker images)
+**Stack a añadir** (ya disponibles, solo configurar):
+- `nginx:alpine` — base del gateway
+- `djangorestframework-simplejwt 5.5.x` — ya en `policy-service/pyproject.toml`
+- Promtail (ya está) — añadir job que scrapee logs del container `gateway`
+- Grafana (ya está) — añadir un dashboard nuevo `gateway.json`
 
-**Contrato de log JSON** (todos los servicios deben emitir esto):
+**Contrato de respuesta de error del gateway** (todos los 4xx/5xx):
 ```json
 {
-  "timestamp": "2026-05-07T10:00:00.000Z",
-  "level": "info",
-  "service": "policy-service",
-  "event": "policy_created",
-  "request_id": "uuid",
-  "policy_id": "uuid",
-  "customer_id": "uuid"
+  "error": {
+    "code": "RATE_LIMIT_EXCEEDED",
+    "message": "Demasiadas peticiones. Intente nuevamente en unos segundos.",
+    "details": {}
+  },
+  "request_id": "uuid-del-gateway"
 }
 ```
 
-**Métricas custom requeridas (mínimo)**:
-| Servicio | Métrica | Tipo | Labels |
-|---|---|---|---|
-| policy | `riskcore_policies_created_total` | Counter | `policy_type` |
-| policy | `riskcore_policies_cancelled_total` | Counter | — |
-| claims | `riskcore_claims_filed_total` | Counter | `incident_type` |
-| claims | `riskcore_claims_status_changed_total` | Counter | `from_status`, `to_status` |
-| audit | `riskcore_kafka_messages_processed_total` | Counter | `topic`, `result` (ok/duplicate/error) |
-| audit | `riskcore_kafka_processing_duration_seconds` | Histogram | `topic` |
-| notification | `riskcore_notifications_sent_total` | Counter | `event_type`, `status` (sent/failed) |
-| notification | `riskcore_celery_task_duration_seconds` | Histogram | `task_name` |
+**Códigos de error estándar** del gateway:
+| HTTP | code | Cuándo |
+|---|---|---|
+| 401 | `UNAUTHORIZED` | JWT ausente o inválido |
+| 429 | `RATE_LIMIT_EXCEEDED` | Excede tier de rate limit |
+| 502 | `BAD_GATEWAY` | Servicio upstream caído |
+| 503 | `SERVICE_UNAVAILABLE` | Timeout upstream |
 
-**Puertos nuevos en docker-compose**:
-- Loki: 3100
-- Prometheus: 9090
-- Grafana: 3000 (ya existe el placeholder)
-- Promtail: sin puerto expuesto (sidecar)
+**Puertos**:
+- Gateway: 80 (en docker-compose, mapeado a host 8080 para no chocar con nada del host)
+- Servicios: siguen en 8001-8004 internos (no exponer al host en producción, solo dev)
 
 ---
 
@@ -143,166 +147,137 @@ Permitido sin pedir permiso: `git status`, `git diff`, `git log`, `git branch`, 
 
 ---
 
-### 🔵 RONDA 1 — Fundamentos paralelos (sin dependencias entre agentes)
+### 🔵 RONDA 1 — Core del gateway (paralelo, sin dependencias entre agentes)
 
-#### Paso 1 — Configurar structlog JSON en los 4 servicios `[CLAUDE CODE]`
+#### Paso 1 — Nginx con JWT, rate limiting y JSON logs `[CLAUDE CODE]`
 
-> Aplicar el mismo patrón en `policy-service`, `claims-service`, `notification-service`, `audit-service`.
+> Reescribir `gateway/nginx.conf` (actualmente solo proxy_pass básico). Añadir verify endpoint en policy-service.
 
-- [x] `structlog` ya presente en los 4 `pyproject.toml` (no requirió cambio)
-- [x] En cada `config/settings/base.py`: `LOGGING` con `ProcessorFormatter` + `structlog.configure()` + `SERVICE_NAME`
-- [x] `apps/core/logging.py` — creado, luego eliminado (código muerto): `add_service_name` movido como `_add_service_name` inline en `base.py` para evitar import circular
-- [x] `apps/core/middleware.py` — `RequestLoggingMiddleware` añadido (logguea `method`, `path`, `status_code`, `duration_ms`)
-- [x] `RequestLoggingMiddleware` añadido al final de `MIDDLEWARE` en los 4 servicios
-- [x] Ruff limpio en los 4 servicios
-- [x] Verificación: `curl http://localhost:8001/health/` → log JSON en stdout (requiere stack levantado)
+- [x] `gateway/nginx.conf` — reescrito con: `log_format json_combined` (http-level en conf.d, dentro de http{}), `access_log` en server{} para no conflictuar con el global de Alpine, `limit_req_zone` api_anon + api_auth, `limit_req_status 429`, `X-Request-ID $request_id` en server{}, `error_page` + locations internal JSON para 401/429/502/503, `auth_request /auth/verify` en todas las locations `/api/...`, `/metrics/*/` con IP whitelist, `/health/` sin auth, `/api/auth/` con rate limit anon, headers de seguridad, timeouts upstream
+- [x] `gateway/Dockerfile` — sin cambios (copia a `conf.d/default.conf`, válido porque conf.d se incluye dentro de http{} en nginx:alpine)
+- [x] `policy-service/apps/auth/` — app creada: `views.py` (JWTVerifyView → 200 si JWT válido, 401 por custom_exception_handler), `urls.py` (verify + token + token/refresh), `apps.py` (label auth_app para no colisionar con django.contrib.auth), `config/urls.py` registrado, `base.py` INSTALLED_APPS actualizado
+- [x] `policy-service/apps/auth/management/commands/seed_test_user.py` — idempotente, solo en DEBUG=True, structlog
+- [x] `ruff check` + `ruff format` limpios en `apps/auth/`
+- [x] `nginx -t` — no executable localmente sin red Docker, validado por revisión de sintaxis + confirmación de que conf.d se incluye en http{} en Alpine
+- [x] Tests: 5 nuevos en `apps/auth/tests/test_verify.py` (valid JWT, no token, invalid token, token_obtain, token_refresh) — todos ✅ · Suite completa: 54 tests, 0 fallos, 91% cobertura
 
-#### Paso 1b — Loki + Promtail + Prometheus en docker-compose `[OPENCODE]`
+#### Paso 1b — docker-compose + Promtail scrape del gateway `[OPENCODE]`
 
-- [x] `infra/loki/loki-config.yml` — config mínima single-binary, retention 7 días, filesystem storage
-- [x] `infra/promtail/promtail-config.yml` — scrape de Docker logs, label `service` extraído del nombre del container, parsing JSON con `pipeline_stages.json`
-- [x] `infra/prometheus/prometheus.yml` — scrape jobs para los 4 servicios (`policy-service:8001/metrics`, etc.) cada 15s
-- [x] `infra/docker-compose.yml` — añadir servicios:
-  - `loki` (image `grafana/loki:2.9.x`, port 3100, volume config + data)
-  - `promtail` (image `grafana/promtail:2.9.x`, monta `/var/run/docker.sock` y `/var/lib/docker/containers`, depends_on loki)
-  - `prometheus` (image `prom/prometheus:v2.55.x`, port 9090, volume config + data)
-  - `grafana` (image `grafana/grafana:11.x`, port 3000, env `GF_SECURITY_ADMIN_PASSWORD=admin`, volumes provisioning + dashboards)
-- [x] Configurar `logging.driver: json-file` y `logging.options` (max-size 10m, max-file 3) en los 4 servicios Django + `notification-consumer`, `audit-consumer`, `notification-celery`
-- [x] Verificación: `make infra` levanta todo · `curl http://localhost:3100/ready` · `curl http://localhost:9090/-/ready` · `curl http://localhost:3000/api/health`
-
----
-
-### 🔵 RONDA 2 — Métricas + Grafana datasources (requiere Ronda 1)
-
-#### Paso 2 — django-prometheus + métricas custom en los 4 servicios `[CLAUDE CODE]`
-
-- [x] `django-prometheus` ya presente en los 4 `pyproject.toml` (no requirió cambio)
-- [x] `INSTALLED_APPS += ["django_prometheus"]` en los 4 `base.py`
-- [x] `PrometheusBeforeMiddleware` primero, `PrometheusAfterMiddleware` último en los 4
-- [x] `config/urls.py` — `path("", include("django_prometheus.urls"))` en los 4 servicios → expone `/metrics`
-- [x] `apps/core/metrics.py` creado en los 4 servicios con counters/histograms `riskcore_*`
-- [x] `policy-service/apps/policies/services.py` — `policies_created_total` + `policies_cancelled_total` instrumentados
-- [x] `claims-service/apps/claims/services.py` — `claims_filed_total` + `claims_status_changed_total` instrumentados
-- [x] `audit-service/apps/audit/kafka_consumer.py` — counter (ok/duplicate/error) + histogram instrumentados
-- [x] `notification-service/apps/notifications/tasks.py` — counter (sent/failed) + histogram instrumentados
-- [x] Ruff limpio en los 4 servicios
-- [x] Verificación: `curl http://localhost:8001/metrics | grep riskcore_policies_created_total` (requiere stack)
-
-#### Paso 2b — Grafana datasources + estructura de provisioning `[OPENCODE]`
-
-- [x] `infra/grafana/provisioning/datasources/datasources.yml` — Loki (http://loki:3100) + Prometheus (http://prometheus:9090) como default
-- [x] `infra/grafana/provisioning/dashboards/dashboards.yml` — provider `file` apuntando a `/etc/grafana/dashboards`
-- [x] `infra/grafana/dashboards/services-overview.json` — Services Overview:
-  - Stat panel: health status de los 4 servicios (query Prometheus `up{job=~".*-service"}`)
-  - Time series: requests/s por servicio (`rate(django_http_requests_total_by_view_transport_method_total[5m])`)
-  - Time series: error rate % por servicio (`rate(django_http_responses_total_by_status[5m])` filtrando 5xx)
-  - Time series: latency p50/p95/p99 (`histogram_quantile` sobre `django_http_requests_latency_seconds_by_view_method`)
-- [x] Verificación: abrir `http://localhost:3000` (admin/admin) → datasources OK → dashboard "Services Overview" carga sin errores
+- [x] `infra/docker-compose.yml` — añadir servicio `gateway`:
+  - `build: ../gateway`
+  - `ports: ["8080:80"]` (mapear a 8080 host, 80 container — evita choque con IIS/admin en Windows)
+  - `depends_on:` policy-web, claims-web, notification-web, audit-web
+  - `logging.driver: json-file` con `max-size: 10m, max-file: 3`
+  - `networks: [riskcore]` (todas los servicios migrados a red `riskcore` explícita)
+- [x] `infra/docker-compose.yml` — modificar entry de `policy-web`: añadido `command: sh -c "python manage.py migrate && python manage.py seed_test_user && python manage.py runserver 0.0.0.0:8001"`.
+- [x] `infra/promtail/promtail-config.yml` — añadido filtro `".*-gateway-.*"` + relabel `service=gateway`. El pipeline JSON existente maneja correctamente el formato de access logs del gateway (campos faltantes `timestamp`/`level` se ignoran, los demás persisten para queries `| json` en Loki).
+- [x] `Makefile` — añadido target `make gateway-test` (`cd gateway && bash test.sh`) + actualizado help y .PHONY.
+- [x] Verificación: `make dev` levanta también el gateway · `curl http://localhost:8080/health/` → 200
 
 ---
 
-### 🔵 RONDA 3 — Logs estructurados específicos + dashboards de dominio (requiere Ronda 2)
+### 🔵 RONDA 2 — Refinamiento y observabilidad del gateway (requiere Ronda 1)
 
-#### Paso 3 — Logs estructurados de Kafka consumer + Celery `[CLAUDE CODE]`
+#### Paso 2 — Pulido de errores, IP whitelist `/metrics` y headers `[CLAUDE CODE]`
 
-- [x] `audit-service/apps/audit/kafka_consumer.py`:
-  - `kafka_message_received` con `topic`, `partition`, `offset`, `event_type`
-  - `kafka_message_processed` con `processing_time_ms`
-  - `kafka_message_duplicate` con `event_id`, `topic`, `offset`
-  - `kafka_message_failed` con `exc_info=True`
-  - `bind_contextvars(event_id=...)` al inicio + `unbind_contextvars` en `finally`
-- [x] `notification-service/apps/notifications/kafka_consumer.py` — mismo patrón (kafka_message_received/processed/duplicate/failed + processing_time_ms + exc_info=True)
-- [x] `notification-service/apps/notifications/tasks.py`:
-  - `celery_task_started` con `task_name`, `task_id`, `notification_id`, `event_type`, `attempt`
-  - `celery_task_succeeded` con `duration_ms`, `recipient`, `attempt`
-  - `celery_task_retry` con `next_retry_in=300`, `error`
-  - `celery_task_failed` con `exc_info=True` (solo en último intento)
-- [x] No hay `print()` ni formato legacy — todo usa structlog con kwargs
+- [x] Endpoints `/metrics/policy|claims|notifications|audit/` con `allow 127.0.0.1; allow 172.16.0.0/12; allow 10.0.0.0/8; deny all;` — implementados en Ronda 1 directamente
+- [x] Headers de seguridad en server{}: `X-Content-Type-Options nosniff`, `X-Frame-Options DENY`, `Referrer-Policy no-referrer` con `always`
+- [x] `proxy_connect_timeout 5s; proxy_read_timeout 30s; proxy_send_timeout 10s;` en server{}
+- [x] Comentarios mínimos donde el por qué no es obvio (`proxy_pass_request_body off`, `access_log` en server vs http)
 
-#### Paso 3b — Dashboards Kafka + Celery + Business `[OPENCODE]`
+#### Paso 2b — Dashboard Grafana del gateway `[OPENCODE]`
 
-- [x] `infra/grafana/dashboards/kafka.json`:
-  - Producer rate por topic (`rate(riskcore_kafka_messages_processed_total[5m])` agrupado por `topic`)
-  - Processing duration p95 (`histogram_quantile(0.95, riskcore_kafka_processing_duration_seconds_bucket)`)
-  - Logs panel (Loki): `{service="audit-service"} | json | event=~"kafka_.*"` últimos 15 min
-- [x] `infra/grafana/dashboards/celery.json`:
-  - Tasks por estado (counter `riskcore_notifications_sent_total` agrupado por `status`)
-  - Duración promedio task (`histogram_quantile` sobre `riskcore_celery_task_duration_seconds`)
-  - Tasa de éxito/fallo (24h) — gauge
-  - Logs panel: `{service="notification-service"} | json | event=~"celery_.*"`
-- [x] `infra/grafana/dashboards/business.json`:
-  - Pólizas creadas/hora (`increase(riskcore_policies_created_total[1h])`)
-  - Siniestros por estado (pie chart con `riskcore_claims_status_changed_total` agrupado por `to_status`)
-  - Notificaciones enviadas/hora por `event_type`
-- [x] Verificación: los 4 dashboards (services-overview + 3 nuevos) cargan automáticamente al levantar Grafana
+- [x] `infra/grafana/dashboards/gateway.json`:
+  - Stat: total requests/s al gateway (`sum(rate({service="gateway"} | json | status != "" [1m]))`)
+  - Time series: requests por upstream (`sum by (upstream_addr) (rate(...))`)
+  - Time series: status codes por servicio
+  - Time series: rate-limited (`limit_req_status="REJECTED"`)
+  - Time series: latency p50/p95/p99 (`quantile_over_time(... unwrap request_time)`)
+  - Logs panel: últimos 4xx/5xx con `request_id` clickable
+- [x] Datasource Loki ya está; reutilizado (`${DS_LOKI}` con UID `P8E80F9AEF21F6940`)
+- [x] Verificación: dashboard `Gateway` carga junto a los otros 4
 
 ---
 
-### 🔵 RONDA 4 — Tests + alertas (requiere Ronda 3)
+### 🔵 RONDA 3 — Self-audit + Tests + Verificación (requiere Ronda 2)
 
-#### Paso 4 — Tests de instrumentación en los 4 servicios `[CLAUDE CODE]`
+> ⚠️ **Antes del paso de tests, cada agente DEBE auditar su propio trabajo.** Ver regla permanente en CLAUDE.md §"Self-Audit obligatorio antes del paso de tests".
 
-- [x] `policy-service/apps/policies/tests/test_metrics.py`: crear póliza → `GET /metrics` → assert `riskcore_policies_created_total{policy_type="VIDA"} >= 1`
-- [x] `claims-service/apps/claims/tests/test_metrics.py`: filar claim → metrics expone counter incrementado
-- [x] `audit-service/apps/audit/tests/test_metrics.py`: process_event → `riskcore_kafka_messages_processed_total{topic="policy.created",result="ok"} >= 1`
-- [x] `notification-service/apps/notifications/tests/test_metrics.py`: ejecutar task → counter `riskcore_notifications_sent_total` incrementado
-- [x] `apps/core/tests/test_logging.py` (uno por servicio): capturar log → parsear JSON → assert keys `timestamp`, `level`, `service`, `event`, `request_id`
-- [x] `apps/core/tests/test_middleware.py` (uno por servicio): request_id generado/propagado, clear_contextvars antes de bind
-- [x] Cobertura mantenida: policy 93% · claims 92% · audit 95% · notification 97%
-- [x] Suite completa verde: 49 + 53 + 45 + 36 = 183 tests, 0 fallos
+#### Paso 3 — `[AUDIT]` Self-audit Claude Code `[CLAUDE CODE]`
 
-#### Paso 4b — Alertas Grafana + verificación end-to-end `[OPENCODE]`
+- [x] Releer `gateway/nginx.conf` línea por línea — `auth_request` en las 4 locations `/api/...` ✅ · `limit_req` en las 4 ✅ · `error_page` apunta a locations `internal` existentes ✅ · `X-Request-ID $request_id` en server{} global ✅
+- [x] Releer `policy-service/apps/auth/` — lógica trivial en view es OK (sin services.py) ✅ · custom_exception_handler maneja el 401 automáticamente ✅ · nada hardcodeado ✅
+- [x] `ruff check` + `ruff format` en `policy-service` → limpios ✅
+- [x] `nginx -t` — validado por revisión de sintaxis (host resolution falla fuera de Docker, esperado) ✅
+- [x] Duplicación resuelta: `proxy_set_header` y timeouts subidos al bloque `server {}` ✅
+- [x] Código muerto: ninguno (ruff lo confirmó) ✅
+- [x] Consistencia: zona `api_anon` para /api/auth/, zona `api_auth` para /api/*, /metrics/* separado
+  - Resumen: **Sin hallazgos de bugs. Un ajuste proactivo: `access_log` movido a server{} para no conflictuar con el global de Alpine. Headers de seguridad y timeouts subidos al nivel server{} para evitar duplicación por location.**
 
-- [x] `infra/grafana/provisioning/alerting/rules.yml` (Grafana unified alerting):
-  - `HighErrorRate` — error rate > 5% en cualquier servicio durante 2 min
-  - `KafkaConsumerLag` — consumer lag > 1000 mensajes durante 5 min (usar `kafka_consumer_lag` si está expuesto, o métrica custom)
-  - `CeleryQueueBacklog` — `celery_tasks_pending > 500` durante 2 min
-  - `ServiceDown` — `up{job=~".*-service"} == 0` durante 30s
-- [x] `infra/grafana/provisioning/alerting/contact-points.yml` — contact point por defecto (puede ser webhook/email dummy en local)
-- [x] Documentar en `infra/README.md` cómo cargan los dashboards y datasources
-- [x] Actualizar `Makefile`: añadir `make logs-loki` (consulta logs vía LogQL desde CLI con logcli) si es trivial
-- [x] Verificación final end-to-end (ver bloque debajo)
+#### Paso 3b — `[AUDIT]` Self-audit OpenCode `[OPENCODE]`
+
+- [x] Releer la entry `gateway` en `docker-compose.yml`: `depends_on` 4 servicios ✅ · `logging` json-file con max-size/max-file ✅ · puerto mapeado 8080:80 (no expone 80 directo) ✅ · `networks: [riskcore]` ✅
+- [x] Releer `promtail-config.yml`: filtro `".*-gateway-.*"` añadido ✅ · relabel `service=gateway` ✅ · pipeline JSON existente maneja access logs del gateway (campos `timestamp`/`level`/`event` no presentes → omitidos, resto del JSON persiste para `| json` en LogQL) ✅
+- [x] Releer `gateway.json`: queries LogQL válidas (Loki range queries con `queryType: "range"` + `quantile_over_time` para latencia) · 8 paneles sin duplicados · títulos en español consistente con otros dashboards · datasources Loki y Prometheus con UIDs correctos ✅
+- [x] `docker compose -f infra/docker-compose.yml config` → válido ✅
+- [x] Scope OpenCode respetado: `infra/docker-compose.yml`, `infra/promtail/promtail-config.yml`, `infra/grafana/dashboards/gateway.json`, `infra/README.md`, `Makefile` — sin tocar servicios Django ni `gateway/nginx.conf` ✅
+  - Resumen: **Sin hallazgos. docker-compose config válido, red `riskcore` explícita para todos los servicios, gateway correctamente mapeado a 8080, promtail captura gateway via Docker SD + relabel, dashboard con 8 paneles (Overview stats, Traffic, Rate Limiting, Latency, Error Logs) usando Loki datasource. Sin código duplicado ni labels incorrectos.**
+
+#### Paso 4 — Tests del gateway `[CLAUDE CODE]`
+
+- [x] `gateway/test.sh` — script bash con curl que:
+  - Sin JWT a `/api/policies/policies/` → 401 + body JSON con `code: "UNAUTHORIZED"`
+  - Obtener JWT vía `POST /api/auth/token/` con credenciales de un user de fixture → 200 + token
+  - Con JWT válido a `/api/policies/policies/` → 200
+  - Con JWT inválido (`Authorization: Bearer xxx`) → 401
+  - 25 requests rápidos sin auth → primeros 20 ok, después 429 + body JSON con `code: "RATE_LIMIT_EXCEEDED"`
+  - Verificar header `X-Request-ID` presente en respuesta y propagado al upstream (chequear log de policy-service por ese request_id)
+  - `/metrics/policy/` desde 127.0.0.1 (host) → respuesta de Prometheus si está en red interna; si no llega, omitir y verificar manualmente
+- [x] `policy-service/apps/auth/tests/test_verify.py` — 5 tests: valid JWT → 200, no token → 401, invalid token → 401, token_obtain → access+refresh, token_refresh → new access. Todos ✅
+- [x] Cobertura `apps/auth/` — incluida en suite completa: 54 tests, 91% cobertura total
+
+#### Paso 4b — Verificación end-to-end + docs `[OPENCODE]`
+
+- [x] `infra/README.md` — añadida sección "Gateway" con: acceso (puerto 8080), obtención de JWT (curl), logs JSON en Loki (queries LogQL), dashboard Gateway (descripción de paneles), rate limit tiers.
+- [x] Ejecutar `bash gateway/test.sh` end-to-end con stack levantado → 11/11 tests pass ✅
+- [x] Abrir Grafana → dashboard Gateway provisionado (UID `riskcore-gateway`) ✅
+- [x] Buscar en Loki: `{service="gateway"} | json | status=~"4.."` → 401 y 429 visibles con `request_id` ✅
+- [x] Trazar un request_id end-to-end: gateway → Loki encuentra el log con el request_id ✅
 
 ---
 
-### ✅ Verificación final (ambos agentes — solo después de Ronda 4)
+### ✅ Verificación final (ambos agentes — solo después de Ronda 3)
 
 ```bash
-# 1. Levantar todo el stack
+# 1. Levantar todo
 make dev
 
-# 2. Health de la pipeline de observabilidad
-curl http://localhost:3100/ready                          # Loki OK
-curl http://localhost:9090/-/ready                        # Prometheus OK
-curl http://localhost:3000/api/health                     # Grafana OK
+# 2. Health del gateway
+curl -s http://localhost:8080/health/ | jq
 
-# 3. Endpoints /metrics de los 4 servicios
-for p in 8001 8002 8003 8004; do curl -s http://localhost:$p/metrics | head -3; done
+# 3. Sin auth → 401
+curl -i http://localhost:8080/api/policies/policies/
 
-# 4. Generar tráfico
-curl -X POST http://localhost:8001/api/policies/customers/ \
+# 4. Obtener JWT (asume fixture user creado en Paso 4)
+TOKEN=$(curl -s -X POST http://localhost:8080/api/auth/token/ \
   -H "Content-Type: application/json" \
-  -d '{"full_name":"Test","email":"test@test.com","dni":"12345678A"}'
-# (crear póliza, claim, transición — ver verificación de Fase 3)
+  -d '{"username":"admin","password":"admin"}' | jq -r .access)
 
-# 5. Verificar métricas custom
-curl -s http://localhost:8001/metrics | grep riskcore_policies_created_total
-curl -s http://localhost:8004/metrics | grep riskcore_kafka_messages_processed_total
+# 5. Con JWT → 200
+curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/policies/policies/ | jq
 
-# 6. Verificar logs en Loki (vía API)
-curl -s 'http://localhost:3100/loki/api/v1/query?query={service="policy-service"}' | jq '.data.result | length'
+# 6. Rate limit anon (sin auth, 25 requests rápidos)
+for i in $(seq 1 25); do curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8080/api/policies/policies/; done | sort | uniq -c
+# Esperado: 20 x 401 + 5 x 429  (las primeras 20 entran y son rechazadas por auth con 401, las siguientes ya las corta el rate limit con 429)
 
-# 7. Grafana: abrir y validar
-open http://localhost:3000   # admin/admin
-# - Datasources: Loki + Prometheus en verde
-# - 4 dashboards cargados (services-overview, kafka, celery, business)
-# - Eventos generados en paso 4 visibles en business dashboard
-# - Logs visibles en panel Loki de kafka.json
+# 7. X-Request-ID propagado
+RID=$(curl -s -i http://localhost:8080/health/ | grep -i x-request-id | awk '{print $2}' | tr -d '\r')
+echo "Request ID: $RID"
 
-# 8. Tests
-for s in policy-service claims-service audit-service notification-service; do
-  cd $s && uv run pytest --cov=apps -v && cd ..
-done
+# 8. Test suite
+bash gateway/test.sh
+
+# 9. Dashboards: abrir http://localhost:3000 → dashboard "Gateway" muestra el tráfico generado
 ```
 
 ---
@@ -317,7 +292,7 @@ done
 | 2 | claims-service | ✅ Completado |
 | 3 | audit-service + notification-service | ✅ Completado |
 | 4 | Observabilidad | ✅ Completado |
-| 5 | Gateway + Rate Limiting | ❌ No iniciado |
+| 5 | Gateway + Rate Limiting | ✅ Completado |
 | 6 | Load Testing | ❌ No iniciado |
 | 7 | Frontend Dashboard | ❌ No iniciado |
 
@@ -343,6 +318,9 @@ done
 - ✅ audit-service: AuditEvent model, API (list+retrieve+filtros), Kafka consumer, WebSocket, tests (29 tests, 97% services, 95% consumer)
 - ✅ notification-service: Notification+NotificationLog models, Celery task, email templates, Kafka consumer, API, tests (21 tests, 100% tasks, 93% consumer)
 - ✅ Observabilidad: structlog JSON en 4 servicios, Loki + Promtail + Prometheus + Grafana, 4 dashboards (Services Overview, Kafka, Celery, Business), 4 alert rules, /metrics expuestos, logs Kafka y Loki verificados end-to-end
+- ✅ Gateway: nginx.conf con JWT auth_request + rate limiting (anon 20r/m, auth 200r/m) + JSON access logs + X-Request-ID propagation + error pages JSON + IP whitelist /metrics
+- ✅ policy-service: apps/auth/ (JWT verify + token endpoints) + seed_test_user management command + tests (5 tests, 91% cov)
+- ✅ Gateway infra: docker-compose entry (8080:80, red riskcore, depends_on 4 servicios) + Promtail scrape (filter + relabel service=gateway) + Grafana dashboard (8 paneles Loki-based) + Makefile gateway-test + infra/README.md sección Gateway
 
 ---
 
@@ -412,22 +390,25 @@ _Ninguno por ahora._
 3. **Archivos compartidos** (`docker-compose.yml`, `Makefile`, `CLAUDE.md`) → solo los modifica el agente cuya tarea lo requiere explícitamente
 4. **Orden de merge**: el agente que empezó primero mergea primero. El segundo hace rebase después.
 
-### Agentes activos — Fase 4
+### Agentes activos — Fase 5
 
 | Agente | Área | Tareas asignadas |
 |---|---|---|
-| **Claude Code** | Código de los 4 servicios Django (instrumentación) | Paso 1 → Paso 2 → Paso 3 → Paso 4 |
-| **OpenCode** | Infra de observabilidad (Loki/Prometheus/Grafana) | Paso 1b → Paso 2b → Paso 3b → Paso 4b |
+| **Claude Code** | Nginx config + endpoint JWT verify en policy-service + tests del gateway | Paso 1 → Paso 2 → Paso 3 (AUDIT) → Paso 4 |
+| **OpenCode** | docker-compose entry del gateway + Promtail scrape + dashboard Grafana + verificación end-to-end | Paso 1b → Paso 2b → Paso 3b (AUDIT) → Paso 4b |
 
 ### División de archivos — quién toca qué
 
 | Área | Agente |
 |---|---|
-| `policy-service/`, `claims-service/`, `notification-service/`, `audit-service/` (settings, middleware, services, consumers, tasks, tests) | **Claude Code** |
-| `infra/loki/`, `infra/promtail/`, `infra/prometheus/`, `infra/grafana/` (configs + dashboards JSON + provisioning) | **OpenCode** |
-| `infra/docker-compose.yml` | **OpenCode** (añade Loki/Promtail/Prometheus/Grafana + logging drivers) |
-| `Makefile` | **OpenCode** si añade targets de observabilidad |
-| `pyproject.toml` de los 4 servicios | **Claude Code** (añade structlog + django-prometheus) |
+| `gateway/nginx.conf`, `gateway/Dockerfile`, `gateway/test.sh` | **Claude Code** |
+| `policy-service/apps/auth/` (verify endpoint + token endpoints + tests) | **Claude Code** |
+| `policy-service/config/settings/base.py` (solo si requiere ajustes mínimos para simplejwt) | **Claude Code** |
+| `infra/docker-compose.yml` (entry `gateway`) | **OpenCode** |
+| `infra/promtail/promtail-config.yml` (verificar/ajustar scrape del gateway) | **OpenCode** |
+| `infra/grafana/dashboards/gateway.json` | **OpenCode** |
+| `infra/README.md` (sección Gateway) | **OpenCode** |
+| `Makefile` (target `gateway-test`) | **OpenCode** |
 
 ### Resolución de conflictos
 

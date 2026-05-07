@@ -137,7 +137,7 @@ Invocar con `/nombre` en Claude Code. Están en `.claude/commands/`.
 | PostgreSQL | 16.x | DB — una por servicio, nunca compartida |
 | psycopg3 binary | 3.3.x | Driver async-ready |
 | structlog | 25.x | JSON structured logs → Loki |
-| django-prometheus | 0.3.x | Métricas → Prometheus |
+| django-prometheus | 2.3.x | Métricas → Prometheus |
 | Django Channels | 4.1.x | WebSockets (audit-service → dashboard) |
 | channels-redis | 4.2.x | Channel layer backend |
 | django-unfold | 0.89.x | Admin UI |
@@ -477,9 +477,45 @@ REDIS_URL=redis://localhost:6379/1
 
 ### Frontend
 ```env
-NEXT_PUBLIC_API_URL=http://localhost:80
-NEXT_PUBLIC_WS_URL=ws://localhost:80/ws/events/
+NEXT_PUBLIC_API_URL=http://localhost:8080
+NEXT_PUBLIC_WS_URL=ws://localhost:8080/ws/events/
 ```
+
+---
+
+## Self-Audit obligatorio antes del paso de tests
+
+**Regla permanente, aplica en todas las fases.**
+
+Antes de pasar al paso de tests de la fase, cada agente DEBE hacer un audit de su propio trabajo. El objetivo: dejar el código limpio antes de testear, no descubrir suciedad cuando ya estás escribiendo asserts.
+
+### Qué revisar (checklist)
+
+1. **Bugs reales** — releer cada archivo modificado buscando: condiciones invertidas, off-by-one, returns olvidados, `except: pass`, recursos no cerrados, race conditions en consumers/tasks.
+2. **Errores silenciosos** — `try/except Exception` sin log + re-raise; mensajes de error genéricos sin contexto; fallbacks que ocultan fallos en vez de exponerlos.
+3. **Duplicación de código** — bloques copiados entre servicios o entre archivos; helpers que ya existían en `apps/core/` y se reescribieron; constantes mágicas repetidas.
+4. **Malas prácticas del proyecto** (consultar este archivo):
+   - Lógica en views.py en vez de services.py
+   - `print()` o `logging.info()` en vez de `structlog`
+   - Hardcode en vez de `python-decouple`
+   - `requests` o `urllib` en vez de `httpx` con timeout
+   - `kafka-python` en vez de `confluent-kafka`
+   - Mensajes de error técnicos en vez de lenguaje de negocio
+   - Comentarios redundantes que repiten lo que el código ya dice
+5. **Código muerto** — imports no usados, funciones definidas y nunca llamadas, variables asignadas y descartadas, ramas inalcanzables.
+6. **Consistencia con el resto del servicio** — naming, estructura de carpetas, formato de respuestas, orden de imports.
+7. **`ruff check` y `ruff format --check`** limpios en todos los servicios tocados (o `nginx -t` si tocaste configs Nginx; `docker compose config` si tocaste compose).
+
+### Cómo se ejecuta
+
+- Es un paso explícito del plan en CONTEXT.md, antes del paso de tests de la fase, marcado como `[AUDIT]`.
+- Cada agente audita SOLO su propio trabajo (sus archivos de la fase). No revisa el del otro agente.
+- Cualquier hallazgo se arregla en el momento, antes de marcar el paso `[x]` y pasar a tests.
+- Si no se encontró nada relevante, dejar una línea breve en CONTEXT.md indicando qué se revisó.
+
+### Por qué importa
+
+Tests escritos sobre código sucio terminan validando bugs. Si un agente entrega código a la suite de tests sin revisarlo, los tests pasarán pero el código quedará con duplicación, naming inconsistente o errores silenciados que después aparecen en review o en producción. El audit cierra ese gap.
 
 ---
 

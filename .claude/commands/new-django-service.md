@@ -150,7 +150,7 @@ dependencies = [
     "django-unfold==0.89.*",
     "django-cors-headers==4.9.*",
     "django-health-check==4.2.*",
-    "django-prometheus==0.3.*",
+    "django-prometheus>=2.3,<2.5",
     "psycopg[binary]==3.3.*",
     "python-decouple==3.8.*",
     "confluent-kafka==2.6.*",
