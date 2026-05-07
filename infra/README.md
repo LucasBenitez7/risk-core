@@ -35,6 +35,7 @@ Al levantar Grafana se carga automáticamente desde `infra/grafana/provisioning/
 | Kafka | `riskcore-kafka` | Message rate, duration p95, consumer logs |
 | Celery | `riskcore-celery` | Task rate, success %, duration, task logs |
 | Business Metrics | `riskcore-business` | Policies/h, claims by status, notifications |
+| Gateway | `riskcore-gateway` | Requests/s, status codes, rate-limiting, latency, error logs |
 
 ## Alertas
 
@@ -60,6 +61,7 @@ Los archivos de configuración:
 make infra          # Levanta solo infra (PG + Redis + Kafka + Loki + Promtail + Prometheus + Grafana)
 make dev            # Levanta todo el stack
 make logs-loki svc=policy  # Consulta logs del policy-service en Loki vía API
+make gateway-test   # Ejecuta el suite de tests de integración del gateway
 ```
 
 ## Acceso
@@ -67,6 +69,55 @@ make logs-loki svc=policy  # Consulta logs del policy-service en Loki vía API
 - **Grafana**: http://localhost:3000 (admin/admin)
 - **Prometheus**: http://localhost:9090
 - **Loki API**: http://localhost:3100
+- **Gateway**: http://localhost:8080
+
+## Gateway
+
+El gateway (Nginx) es el punto único de entrada a los servicios. Maneja rate limiting, autenticación JWT y logging JSON.
+
+### Cómo acceder
+
+```bash
+curl http://localhost:8080/health/
+```
+
+### Obtener JWT
+
+```bash
+curl -s -X POST http://localhost:8080/api/auth/token/ \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"admin"}' | jq -r .access
+```
+
+### Logs JSON en Loki
+
+Los access logs del gateway usan formato JSON y se envían a Loki vía Promtail con label `service=gateway`:
+
+```bash
+# Buscar errores 4xx/5xx
+curl -s "http://localhost:3100/loki/api/v1/query_range?query={service=\"gateway\"}|json|status=~\"[45]..\"&limit=20"
+
+# Trazar un request_id end-to-end
+curl -s "http://localhost:3100/loki/api/v1/query_range?query={service=~\"gateway|.*-service\"}|json|request_id=\"UUID\"&limit=5"
+```
+
+### Dashboard Gateway
+
+El dashboard **Gateway** en Grafana (`riskcore-gateway`) muestra:
+- Requests/s totales al gateway
+- Requests por upstream (policy/claims/notifications/audit)
+- Status codes (2xx/4xx/5xx)
+- Rate-limiting (429 con `limit_req_status=REJECTED`)
+- Latencia p50/p95/p99 (`request_time`)
+- Últimos errores con `request_id` para traceabilidad
+
+### Rate limit tiers
+
+| Tier | Límite | Headers |
+|---|---|---|
+| Sin auth (IP) | 20 req/min | `X-RateLimit-Limit` en headers |
+| Con JWT | 200 req/min | — |
+| Whitelist admin | Sin límite | — |
 
 ## Añadir un dashboard nuevo
 
