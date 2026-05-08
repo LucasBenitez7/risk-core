@@ -18,6 +18,7 @@ dependencies = [
     "django-unfold>=0.89,<0.90",
     "celery>=5.4,<5.5",
     "redis>=5.2,<5.3",
+    "gunicorn>=26.0.0",
 ]
 
 [project.optional-dependencies]
