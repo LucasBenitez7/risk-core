@@ -19,6 +19,7 @@ dependencies = [
     "django-unfold>=0.89,<0.90",
     "channels>=4.1,<4.2",
     "channels-redis>=4.2,<4.3",
+    "gunicorn>=26.0.0",
 ]
 
 [project.optional-dependencies]

@@ -17,6 +17,7 @@ dependencies = [
     "python-decouple>=3.8,<3.9",
     "django-unfold>=0.89,<0.90",
     "httpx>=0.28,<0.29",
+    "gunicorn>=26.0.0",
 ]
 
 [project.optional-dependencies]

@@ -593,19 +593,27 @@ Usar `/commit-ready` para preparar commits agrupados antes de pedir permiso.
 
 #### Formato obligatorio — título y descripción de PR (siempre en INGLÉS)
 
-> **Importante**: el título y la descripción se generan **en inglés** y se entregan al usuario en un único bloque listo para copiar y pegar en GitHub. El agente NO crea el PR, solo prepara el contenido.
+> **Regla absoluta**: el agente NUNCA crea el PR (`gh pr create`). Solo genera el título y la descripción como texto para que el usuario los copie y pegue en GitHub. Si el usuario pide "crea el PR", el agente responde con el bloque de texto y le indica que lo copie a la UI de GitHub.
 
 **Título** — máximo 72 caracteres, formato:
 ```
-[Phase N] scope: imperative summary
+[Type/Phase N] scope: imperative summary
 ```
+
+Donde `Type` es el tipo de cambio principal de la fase:
+- `feat` — nueva funcionalidad
+- `fix` — corrección de bug
+- `refactor` — reestructuración sin cambio de behavior
+- `chore` — infra, tooling, configs
+- `docs` — solo documentación
 
 Ejemplos:
 ```
-[Phase 1] policy-service: add models, API, Kafka events, tests
-[Phase 2] claims-service: add state machine and inter-service verify
-[Phase 3] consumers: audit append-only and notifications via Celery
-[Phase 5] gateway: add Nginx with JWT auth, rate limiting and JSON logs
+[Feat/Phase 1] policy-service: add models, API, Kafka events, tests
+[Feat/Phase 2] claims-service: add state machine and inter-service verify
+[Feat/Phase 3] consumers: audit append-only and notifications via Celery
+[Feat/Phase 5] gateway: add Nginx with JWT auth, rate limiting and JSON logs
+[Chore/Phase 0] infra: initial monorepo skeleton and Docker Compose
 ```
 
 **Descripción** — siempre esta estructura, en inglés:
@@ -628,6 +636,7 @@ Ejemplos:
 ```
 
 Reglas del título:
+- `Type` = tipo de commit principal de la fase (`feat`, `fix`, `refactor`, `chore`, `docs`)
 - Scope = nombre del servicio o área (`policy-service`, `claims-service`, `infra`, `frontend`, `gateway`)
 - Imperativo en presente: `add`, `implement`, `fix`, `refactor` — nunca `added`, `adding`
 - Sin punto final
@@ -640,7 +649,7 @@ Cuando el usuario pide preparar un PR, el agente responde con un único bloque m
 ````markdown
 **Título:**
 ```
-[Phase N] scope: imperative summary
+[Type/Phase N] scope: imperative summary
 ```
 
 **Descripción:**
@@ -661,7 +670,7 @@ Cuando el usuario pide preparar un PR, el agente responde con un único bloque m
 ```
 ````
 
-El usuario copia título y descripción a la UI de GitHub. El agente nunca ejecuta `gh pr create` sin confirmación explícita.
+El usuario copia título y descripción a la UI de GitHub. El agente **nunca ejecuta `gh pr create`** — el PR lo crea siempre el usuario manualmente.
 
 ---
 

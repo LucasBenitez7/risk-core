@@ -130,3 +130,52 @@ El dashboard **Gateway** en Grafana (`riskcore-gateway`) muestra:
 1. Añadir la regla en `grafana/provisioning/alerting/rules.yml`
 2. La regla debe tener un `uid` único
 3. Reiniciar Grafana o esperar al reload de provisioning
+
+## Load Testing
+
+Locust-based load testing suite. Scenarios live in `infra/load-testing/`.
+
+### Escenarios
+
+| # | Archivo | Usuarios | Objetivo |
+|---|---|---|---|
+| 1 | `scenario_1_policy_creation.py` | 500 | Create customer → policy → verify, p95 < 500ms |
+| 2 | `scenario_2_claims_filing.py` | 300 | File claim + transition, p95 < 800ms |
+| 3 | `scenario_3_audit_read.py` | 1000 | Read-only audit queries, p95 < 200ms |
+| 4 | `scenario_4_spike.py` | 0→1000 | Spike test, observar consumer lag |
+| 5 | `scenario_5_stress.py` | hasta 5000 | Stress hasta error rate > 10% |
+
+### Ejecutar
+
+```bash
+# Web UI (abrir http://localhost:8089)
+make load-test-ui
+
+# Headless por escenario
+make load-test-1
+make load-test-2
+make load-test-3
+make load-test-4
+make load-test-5
+```
+
+### Dashboard
+
+Abrir **Load Testing** (`load-testing`) en Grafana para monitorear durante los tests:
+- Requests/s por servicio
+- Error rate % (4xx+5xx / total)
+- Latencia p50/p95/p99 del gateway
+- Kafka consumer lag
+- CPU por contenedor
+
+### Reports HTML
+
+Los reports HTML se guardan en `infra/load-testing/results/`:
+- `scenario_N_report.html` — statistics, charts, failure breakdown
+
+### Prerequisites
+
+```bash
+make dev          # Stack completo corriendo
+make kafka-setup   # Topics de Kafka creados
+```
