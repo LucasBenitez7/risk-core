@@ -59,6 +59,59 @@ groups:
           severity: critical
         isPaused: false
 
+      - uid: alert-circuit-breaker-open
+        title: Policy Circuit Breaker Open
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: PBFA97CFB590B2093
+            model:
+              editorMode: code
+              expr: 'circuit_breaker_state{target="policy-service"}'
+              instant: true
+              range: false
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: __expr__
+            model:
+              expression: A
+              reducer: last
+              refId: B
+              type: reduce
+          - refId: C
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: __expr__
+            model:
+              expression: B
+              refId: C
+              type: threshold
+              conditions:
+                - evaluator:
+                    params: [1]
+                    type: gte
+                  operator:
+                    type: and
+                  query:
+                    params: []
+                  type: query
+        noDataState: NoData
+        execErrState: Error
+        for: 2m
+        annotations:
+          summary: "Circuit breaker policy-service OPEN"
+          description: "claims-service cannot reach policy-service for 2+ minutes. Calls are failing fast."
+        labels:
+          severity: warning
+        isPaused: false
+
       - uid: alert-high-error-rate
         title: High Error Rate
         condition: C
@@ -226,4 +279,110 @@ groups:
           description: "{{ $labels.event_type }} notification failure rate is above 10% for the last 5 minutes."
         labels:
           severity: warning
+        isPaused: false
+
+      - uid: alert-outbox-pending-high
+        title: Outbox Pending Events High
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: PBFA97CFB590B2093
+            model:
+              editorMode: code
+              expr: 'outbox_pending_total'
+              instant: true
+              range: false
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: __expr__
+            model:
+              expression: A
+              reducer: last
+              refId: B
+              type: reduce
+          - refId: C
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: __expr__
+            model:
+              expression: B
+              refId: C
+              type: threshold
+              conditions:
+                - evaluator:
+                    params: [1000]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: []
+                  type: query
+        noDataState: NoData
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: "Outbox accumulating events — relay possibly down"
+          description: "Outbox pending count is above 1000 for 5+ minutes. The outbox relay may be down or Kafka is unreachable."
+        labels:
+          severity: warning
+        isPaused: false
+
+      - uid: alert-outbox-event-failed
+        title: Outbox Event Failed
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: PBFA97CFB590B2093
+            model:
+              editorMode: code
+              expr: 'increase(outbox_failed_total[10m])'
+              instant: true
+              range: false
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: __expr__
+            model:
+              expression: A
+              reducer: last
+              refId: B
+              type: reduce
+          - refId: C
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: __expr__
+            model:
+              expression: B
+              refId: C
+              type: threshold
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: []
+                  type: query
+        noDataState: NoData
+        execErrState: Error
+        for: 0m
+        annotations:
+          summary: "Outbox event marked FAILED"
+          description: "An outbox event failed after max retries on topic {{ $labels.topic }}. Investigate manually."
+        labels:
+          severity: critical
         isPaused: false

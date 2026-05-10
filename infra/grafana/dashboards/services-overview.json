@@ -324,6 +324,77 @@
       ],
       "title": "Request Latency (p50/p95/p99) by Service",
       "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 34 },
+      "id": 140,
+      "panels": [],
+      "title": "Circuit Breaker",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "options": { "0": { "color": "green", "text": "Closed" } }, "type": "value" },
+            { "options": { "1": { "color": "red", "text": "Open" } }, "type": "value" },
+            { "options": { "2": { "color": "yellow", "text": "Half-Open" } }, "type": "value" }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 },
+              { "color": "yellow", "value": 2 }
+            ]
+          },
+          "unit": "none"
+        }
+      },
+      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 35 },
+      "id": 141,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "pluginVersion": "11.6.0",
+      "targets": [
+        {
+          "expr": "circuit_breaker_state{target=\"policy-service\"}",
+          "legendFormat": "claims → policy",
+          "refId": "A"
+        }
+      ],
+      "title": "Circuit Breaker State — claims → policy-service",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "axisCenteredZero": false, "axisColorMode": "text", "axisLabel": "transitions/s", "axisPlacement": "auto", "fillOpacity": 20, "gradientMode": "none", "hideFrom": { "legend": false, "tooltip": false, "viz": false }, "lineWidth": 1, "pointSize": 5, "scaleDistribution": { "type": "linear" }, "thresholdsStyle": { "mode": "off" } },
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 4, "w": 16, "x": 8, "y": 35 },
+      "id": 142,
+      "options": { "legend": { "calcs": ["sum"], "displayMode": "table", "placement": "bottom", "showLegend": true } },
+      "targets": [
+        {
+          "expr": "increase(circuit_breaker_state_changes_total{target=\"policy-service\"}[5m])",
+          "legendFormat": "{{from_state}} → {{to_state}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Circuit Breaker State Changes (5m window)",
+      "type": "timeseries"
     }
   ],
   "refresh": "30s",

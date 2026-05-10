@@ -1,6 +1,6 @@
 import uuid
 from decimal import Decimal
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from rest_framework.exceptions import ValidationError
@@ -12,14 +12,7 @@ from apps.core.exceptions import (
     PolicyInactiveError,
     PolicyServiceUnavailableError,
 )
-
-
-@pytest.fixture(autouse=True)
-def mock_kafka():
-    with patch("apps.claims.services._get_producer") as mock:
-        mock.return_value = MagicMock()
-        yield mock
-
+from apps.outbox.models import OutboxEvent
 
 MOCK_VERIFY = "apps.claims.clients.PolicyServiceClient.verify_policy"
 
@@ -56,6 +49,10 @@ class TestFileClaim:
         assert history.from_status == ""
         assert history.to_status == Claim.Status.FILED
         assert history.notes == "Siniestro reportado"
+
+        assert OutboxEvent.objects.filter(
+            event_type="claim.filed", aggregate_id=claim.id
+        ).exists()
 
     def test_file_claim_with_location(self):
         policy_id = str(uuid.uuid4())
@@ -211,19 +208,23 @@ class TestTransitionStatus:
             ClaimService().transition_status(claim, "UNDER_REVIEW")
         assert exc_info.value.details["allowed_transitions"] == []
 
-    def test_transition_to_resolved_emits_both_events(self, mock_kafka):
+    def test_transition_to_resolved_emits_both_events(self):
         claim = self._create_filed_claim()
         claim = ClaimService().transition_status(claim, "UNDER_REVIEW")
         claim = ClaimService().transition_status(
             claim, "APPROVED", approved_amount=Decimal("500.00")
         )
 
-        producer = mock_kafka.return_value
-        assert producer.produce_claim_status_changed.called
+        assert OutboxEvent.objects.filter(
+            event_type="claim.status_changed", aggregate_id=claim.id
+        ).exists()
 
-        producer.produce_claim_resolved.reset_mock()
+        before_count = OutboxEvent.objects.filter(event_type="claim.resolved").count()
         ClaimService().transition_status(claim, "RESOLVED")
-        assert producer.produce_claim_resolved.called
+        assert (
+            OutboxEvent.objects.filter(event_type="claim.resolved").count()
+            == before_count + 1
+        )
 
 
 @pytest.mark.django_db

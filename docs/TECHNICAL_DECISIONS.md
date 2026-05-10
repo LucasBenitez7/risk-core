@@ -581,7 +581,76 @@ RUN uv sync --frozen --no-dev
 
 ---
 
-## 23. Deploy — Railway
+## 23. Outbox Pattern — At-Least-Once Delivery DB↔Kafka
+
+**Decisión**: Patrón Outbox transaccional en `policy-service` y `claims-service` para eliminar el dual-write entre PostgreSQL y Kafka.
+
+**Problema que resuelve**: en el modelo previo (Fase 6), `services.py` hacía `Policy.objects.create()` y luego `producer.produce_policy_created()` fuera de la transacción. Si el proceso moría entre el commit de DB y el publish de Kafka, el evento se perdía para siempre — pero la API ya había respondido 201 al cliente. Inconsistencia silenciosa.
+
+**Implementación**:
+- App Django `apps/outbox/` en cada servicio con un único modelo `OutboxEvent` (status PENDING/PUBLISHED/FAILED)
+- Productor (`emit_policy_event`, `emit_claim_event`): inserta `OutboxEvent` **dentro** del mismo `transaction.atomic()` que crea/actualiza el aggregate
+- Relay separado (`run_outbox_relay` management command, container Docker propio): `select_for_update(skip_locked=True)` + `producer.flush()` dentro de la transacción del relay → garantiza que el evento llegó al broker antes de marcar `published_at` en DB
+- Índice parcial PostgreSQL `WHERE status='PENDING'` → escala a millones de eventos publicados sin degradar el escaneo de pendientes
+
+**Garantía**: at-least-once. Los consumers (`audit-service`, `notification-service`) ya manejan duplicados via `IntegrityError` por `event_id`, así que no requieren cambios.
+
+**Trade-offs aceptados**:
+- +1 INSERT por mutación (latencia +5-15ms en p95 — verificado en `load-testing-results.md` §Phase 6.5 retest, no introdujo regresión medible)
+- +2 containers (`policy-outbox-relay`, `claims-outbox-relay`)
+- Eventual consistency entre DB y Kafka (típicamente <500ms con `POLL_INTERVAL=0.5s`)
+
+**Alternativa descartada — Debezium / CDC**: lee el WAL de PostgreSQL y publica cambios a Kafka. Más robusto en producción pero overkill para este monorepo dockerizado: requiere un Connect cluster, configuración de replicación, y rompe el modelo Database-per-Service (Debezium necesita acceso al WAL del cluster, no solo a una DB lógica). El relay-as-management-command da el 90% del beneficio con 1/10 del operational burden.
+
+**Alternativa descartada — `transaction.on_commit(producer.produce)`**: parece equivalente pero no lo es. Si el proceso muere después del commit pero antes del callback `on_commit`, el evento se pierde. El outbox sobrevive a crashes de proceso porque el evento está en DB.
+
+**Verificación de fault tolerance** (test manual en `docs/PHASE_6_5_HARDENING.md` §3.9):
+```bash
+docker compose stop kafka
+curl -X POST .../api/policies/policies/  # → 201 OK inmediato
+# OutboxEvent queda PENDING
+docker compose start kafka                # → relay publica en <1s
+```
+
+---
+
+## 24. Circuit Breaker — claims → policy
+
+**Decisión**: `pybreaker` envuelve la llamada HTTP `claims-service → policy-service /verify/`. Tras 5 fallos consecutivos de infra (5xx, timeouts), el circuito abre durante 30s y todas las llamadas fallan inmediatamente.
+
+**Problema que resuelve**: sin breaker, una degradación prolongada de `policy-service` (caída total, latencia alta sostenida) hace que cada Gunicorn worker de `claims-service` espere 5 segundos por request a `verify`. Con 50 usuarios concurrentes file-claim, los 4 workers se saturan en segundos esperando timeouts. El sistema entero se cuelga aunque solo policy-service esté degradado.
+
+**Configuración**:
+```python
+_policy_breaker = pybreaker.CircuitBreaker(
+    fail_max=5,                      # 5 fallos consecutivos → open
+    reset_timeout=30,                # tras 30s → half-open (prueba 1 request)
+    exclude=[_ClientBusinessError],  # 4xx no cuentan como fallo
+    listeners=[_BreakerMetrics()],
+)
+```
+
+**Sutileza crítica — 4xx vs 5xx**: HTTP 404 ("póliza no existe") es error de cliente, no fallo de infra. Si pybreaker contara 404s, 5 usuarios con UUIDs inválidos abrirían el circuito para todos. La solución es separar la llamada HTTP cruda (`_http_verify` decorado por el breaker) del manejo de errores de negocio (`verify_policy`): los 4xx se convierten a `_ClientBusinessError`, que está en `exclude=[]` → no incrementan el contador.
+
+**Métricas Prometheus**:
+- `circuit_breaker_state{target="policy-service"}` — Gauge 0=closed, 1=open, 2=half-open
+- `circuit_breaker_state_changes_total{target,from_state,to_state}` — Counter de transiciones
+
+**Alerta Grafana**: `PolicyCircuitBreakerOpen` — `circuit_breaker_state >= 1` durante 2m → severity warning.
+
+**Por qué pybreaker y no alternativas**:
+- **`pybreaker`** ✅ — implementación canónica de Python, síncrona (compatible con `httpx.Client` síncrono que ya usamos), API de listeners limpia para emitir métricas
+- ❌ **`circuitbreaker`** (decorador) — no soporta listeners, métricas requieren monkey-patching
+- ❌ **`tenacity`** — es retry, no breaker. Útil con backoff exponencial, pero no protege contra cascada de timeouts si el upstream sigue caído
+- ❌ **Hystrix-py** — abandonado desde 2018, basado en Hystrix de Netflix que el propio Netflix puso en mantenimiento mode
+
+**Por qué thresholds 5/30s**: 5 fallos da margen para degradaciones transitorias (1 request lenta no abre). 30s es suficiente para que un policy-service en restart termine de levantarse. Ambos son configurables — el plan abre la puerta a tunearlos por servicio si se observan falsos positivos.
+
+**No usado para `consumer → DB` o `consumer → Kafka`**: esos paths ya son retried por Kafka (auto-retry en consumer) o por confluent-kafka (auto-retry interno). El breaker solo agrega valor donde no hay retry automático — la llamada HTTP síncrona inter-service.
+
+---
+
+## 25. Deploy — Railway
 
 **Decisión**: Railway para producción. Un proyecto Railway por microservicio.
 

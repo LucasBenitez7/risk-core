@@ -1,5 +1,5 @@
 import uuid
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -8,15 +8,9 @@ from apps.core.exceptions import (
     InvalidPolicyStatusError,
     PolicyNotFoundError,
 )
+from apps.outbox.models import OutboxEvent
 from apps.policies.models import Customer, Policy
 from apps.policies.services import PolicyService
-
-
-@pytest.fixture(autouse=True)
-def mock_kafka():
-    with patch("apps.policies.services._get_producer") as mock:
-        mock.return_value = MagicMock()
-        yield mock
 
 
 @pytest.mark.django_db
@@ -40,6 +34,10 @@ class TestCreatePolicy:
         assert policy.status == Policy.Status.ACTIVE
         assert float(policy.premium_amount) == 150.00
         assert policy.policy_number.startswith("POL-")
+
+        assert OutboxEvent.objects.filter(
+            event_type="policy.created", aggregate_id=policy.id
+        ).exists()
 
     def test_create_policy_with_coverages(self):
         customer = Customer.objects.create(
@@ -104,6 +102,10 @@ class TestCancelPolicy:
         assert result.status == Policy.Status.CANCELLED
         assert result.cancellation_reason == "Client request"
 
+        assert OutboxEvent.objects.filter(
+            event_type="policy.cancelled", aggregate_id=policy.id
+        ).exists()
+
     def test_cancel_already_cancelled_policy(self):
         customer = Customer.objects.create(
             full_name="Double Cancel",
@@ -160,6 +162,10 @@ class TestUpdatePolicy:
         result = PolicyService().update_policy(policy, data)
         assert float(result.premium_amount) == 200.00
         assert result.description == "Updated policy"
+
+        assert OutboxEvent.objects.filter(
+            event_type="policy.updated", aggregate_id=policy.id
+        ).exists()
 
     def test_update_cancelled_policy_fails(self):
         customer = Customer.objects.create(
@@ -353,3 +359,32 @@ class TestGetPoliciesQueryset:
         )
         assert qs.count() == 1
         assert qs.first().start_date.isoformat() == "2025-07-01"
+
+
+@pytest.mark.django_db
+class TestOutboxIntegration:
+    def test_rollback_does_not_create_outbox_event(self):
+        customer = Customer.objects.create(
+            full_name="Rollback User",
+            email="rollback@example.com",
+            dni="99999999Z",
+        )
+        data = {
+            "customer_id": customer.id,
+            "policy_type": Policy.PolicyType.LIFE,
+            "premium_amount": 150.00,
+            "start_date": "2025-01-01",
+            "end_date": "2026-01-01",
+        }
+
+        with (
+            patch(
+                "apps.policies.services.emit_policy_event",
+                side_effect=Exception("Simulated failure"),
+            ),
+            pytest.raises(Exception, match="Simulated failure"),
+        ):
+            PolicyService().create_policy(data)
+
+        assert Policy.objects.count() == 0
+        assert OutboxEvent.objects.count() == 0

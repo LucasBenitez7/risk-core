@@ -1,11 +1,15 @@
 # PHASE 6.5 — Resilience Hardening
 
-> **Audiencia**: OpenCode (ejecutor principal) + Claude Code (revisor/coordinador).
-> **Cuándo leer este archivo**: al iniciar la fase 6.5, después de cerrar la fase 6 (load testing) y antes de la fase 7 (frontend).
-> **Rama Git**: crear `feat/phase-6-5-hardening` desde `dev` cuando la fase 6 mergee.
-> **Estimado**: ~1 día.
+> **Audiencia**: Claude Code (Bloque A + docs) · OpenCode (Bloque B + toda ejecución).
+> **Cuándo leer este archivo**: al iniciar la fase 6.5, ambos agentes leen completo antes de empezar.
+> **Rama Git**: `feat/phase-6-5-hardening` (ya creada desde `dev`).
+> **Estimado**: ~6-8h en paralelo (A y B corren al mismo tiempo).
 >
-> Este archivo NO reemplaza a `CONTEXT.md`. Se mantiene aparte para que OpenCode pueda seguirlo paso a paso sin que el contexto activo lo distraiga. `CONTEXT.md` solo apuntará a este archivo durante la fase.
+> **División de trabajo**:
+> - **Claude Code** → §2 Bloque A completo (escribe código). §4 Bloque C docs (redacta con números de OpenCode). Audit final.
+> - **OpenCode** → §3 Bloque B completo (escribe + ejecuta). Ejecuta tests del Bloque A. Corre load tests del Bloque C.
+>
+> Este archivo NO reemplaza a `CONTEXT.md`. Se mantiene aparte para seguirlo paso a paso sin que el contexto activo lo distraiga.
 
 ---
 

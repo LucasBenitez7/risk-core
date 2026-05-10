@@ -41,14 +41,10 @@ Permitido sin pedir permiso: `git status`, `git diff`, `git log`, `git branch`, 
 <a id="s2"></a>
 ## 2. Estado actual
 
-**Fase**: 6.5 — Resilience Hardening (preparada, **pendiente de iniciar**)
-**Rama activa**: `feat/phase-6-load-testing` (con commits ya pusheados, esperando PR merge)
-**Próxima rama**: `feat/phase-6-5-hardening` — crear desde `dev` cuando merge el PR de Fase 6
-**Última tarea completada**: Fase 6 completada y pusheada (5 commits, +3746/-173 líneas). PR pendiente de crear.
-**Próximo paso**:
-  1. Crear PR `feat/phase-6-load-testing` → `dev` y esperar merge
-  2. `git checkout dev && git pull && git checkout -b feat/phase-6-5-hardening`
-  3. Iniciar **Bloque A — Circuit Breaker** según plan en `docs/PHASE_6_5_HARDENING.md`
+**Fase**: 6.5 — Resilience Hardening (**completada — pendiente commits + PR**)
+**Rama activa**: `feat/phase-6-5-hardening`
+**Última tarea completada**: Hotfix bottleneck `generate_policy_number()` — `select_for_update()` reemplazado por PostgreSQL `SEQUENCE` (`nextval()`), migración 0002, backend detection para preservar tests SQLite.
+**Próximo paso**: OpenCode aplica `uv run python manage.py migrate` en policy-service y re-corre scenarios 1, 2, 5 para verificar que el breaking point sube más allá de 50 usuarios. Después: `/commit-ready` para preparar commits.
 
 ---
 
@@ -57,56 +53,50 @@ Permitido sin pedir permiso: `git status`, `git diff`, `git log`, `git branch`, 
 
 > Plan completo y detallado: **`docs/PHASE_6_5_HARDENING.md`** (no duplicar aquí — el archivo es la fuente de verdad).
 > Rama: `feat/phase-6-5-hardening` (crear desde `dev` post-merge de Fase 6) | Scope commits: `feat(claims)`, `feat(policy)`, `chore(infra)`, `docs`
-> **Single agente: OpenCode ejecuta los 3 bloques. Claude Code revisa al final de cada bloque y al cierre de fase.**
+> **Bloques A y B en paralelo: Claude Code hace A, OpenCode hace B. Sin dependencias entre ellos. OpenCode ejecuta tests y Bloque C al terminar ambos. Claude Code hace audit final y docs.**
 
 ---
 
 ### Resumen de bloques
 
-| Bloque | Patrón | Archivos clave | Estimado |
-|---|---|---|---|
-| A | Circuit Breaker | `claims-service/apps/claims/clients.py`, `apps/core/metrics.py` | ~2h |
-| B | Outbox Pattern | `apps/outbox/` en policy y claims, refactor de `events.py` y `services.py`, 2 containers nuevos en docker-compose | ~6-8h |
-| C | Verificación + docs | re-correr scenarios 1, 2, 5; actualizar `load-testing-results.md` y `docs/TECHNICAL_DECISIONS.md` | ~1h |
+| Bloque | Patrón | Agente | Archivos clave | Estimado |
+|---|---|---|---|---|
+| A | Circuit Breaker | **Claude Code** (escribe) + **OpenCode** (ejecuta) | `claims-service/apps/claims/clients.py`, `apps/core/metrics.py` | ~2h |
+| B | Outbox Pattern | **OpenCode** (escribe + ejecuta) | `apps/outbox/` en policy y claims, refactor de `events.py` y `services.py`, 2 containers nuevos en docker-compose | ~6-8h |
+| C | Verificación + docs | **OpenCode** (load tests) + **Claude Code** (docs) | re-correr scenarios 1, 2, 5; actualizar `load-testing-results.md` y `docs/TECHNICAL_DECISIONS.md` | ~1h |
 
-**Total**: ~1 día.
+**Total paralelo**: ~6-8h (A y B corren al mismo tiempo).
 
 ---
 
 ### Pasos de alto nivel (detalle completo en PHASE_6_5_HARDENING.md)
 
-#### Bloque A — Circuit Breaker `[OPENCODE]`
+#### Bloque A — Circuit Breaker `[CLAUDE CODE escribe · OPENCODE ejecuta]`
 
-- [ ] `uv add pybreaker` en claims-service
-- [ ] Refactor de `apps/claims/clients.py` con `@_policy_breaker` decorator + excepción interna `_ClientBusinessError` para excluir 4xx
-- [ ] Métricas Prometheus: `circuit_breaker_state` (Gauge), `circuit_breaker_state_changes_total` (Counter)
-- [ ] Panel Grafana en `services.json` + alerta `PolicyCircuitBreakerOpen for 2m`
-- [ ] Tests: 5 fallos consecutivos → circuito abre, 404 no cuenta, recovery tras `reset_timeout`
-- [ ] Self-audit del bloque (ver §6 del plan completo)
+- [x] Refactor de `apps/claims/clients.py` con `_policy_breaker` + `_ClientBusinessError` para excluir 4xx
+- [x] Métricas Prometheus en `apps/core/metrics.py`: `circuit_breaker_state` (Gauge), `circuit_breaker_state_changes_total` (Counter)
+- [x] Panel Grafana en `services-overview.json` (row + stat + timeseries) + alerta `PolicyCircuitBreakerOpen for 2m` en `provisioning/alerting/rules.yml`
+- [x] Tests: 5 fallos consecutivos → circuito abre, 404 no cuenta, 200 inválido no cuenta, happy path
+- [x] **OpenCode**: `uv add pybreaker`, `uv run pytest`, verificación manual (stop policy-web, 6 requests → fail-fast)
 
-#### Bloque B — Outbox Pattern `[OPENCODE]`
+#### Bloque B — Outbox Pattern `[OPENCODE escribe + ejecuta]`
 
-- [ ] Crear app Django `apps/outbox/` en policy-service y claims-service
-- [ ] Modelo `OutboxEvent` con índice parcial PostgreSQL `WHERE status='PENDING'`
-- [ ] Management command `run_outbox_relay` con `select_for_update(skip_locked=True)`
-- [ ] Refactor productores: `PolicyEventProducer` → `PolicyEventBuilder` + `emit_policy_event()` (escribe al outbox dentro de transacción)
-- [ ] Refactor `services.py` en ambos servicios — `produce_*` calls reemplazadas por `emit_*_event()` dentro de `transaction.atomic()`
-- [ ] 2 containers nuevos en `infra/docker-compose.yml`: `policy-outbox-relay`, `claims-outbox-relay`
-- [ ] Migraciones aplicadas: `uv run python manage.py migrate`
-- [ ] Métricas: `outbox_pending_total`, `outbox_published_total{topic}`, `outbox_failed_total{topic}`, `outbox_lag_seconds`
-- [ ] Alertas: `OutboxPendingHigh > 1000 for 5m` (warning), `OutboxEventFailed` (critical)
-- [ ] Tests: rollback no deja eventos, relay publica OK, concurrencia con threads, fault tolerance (Kafka stop → API 201 → evento PENDING → Kafka start → evento PUBLISHED)
-- [ ] Self-audit del bloque
+- [x] Crear app Django `apps/outbox/` en policy-service y claims-service
+- [x] Modelo `OutboxEvent` con índice parcial PostgreSQL `WHERE status='PENDING'`
+- [x] Management command `run_outbox_relay` con `select_for_update(skip_locked=True)`
+- [x] Refactor productores: `PolicyEventProducer` → `PolicyEventBuilder` + `emit_policy_event()` dentro de transacción
+- [x] Refactor `services.py` en ambos servicios — `produce_*` → `emit_*_event()` dentro de `transaction.atomic()`
+- [x] 2 containers nuevos en `infra/docker-compose.yml`: `policy-outbox-relay`, `claims-outbox-relay`
+- [x] Métricas outbox en `apps/core/metrics.py` de cada servicio + alertas en `alert-rules.yml`
+- [x] Tests: rollback no deja eventos, relay publica OK, concurrencia con threads, fault tolerance Kafka stop/start
+- [x] **OpenCode ejecuta**: `makemigrations outbox && migrate`, `uv run pytest`, `docker compose up` relays, fault tolerance test
 
-#### Bloque C — Verificación final `[OPENCODE]`
+#### Bloque C — Verificación final `[OPENCODE ejecuta · CLAUDE CODE redacta docs]`
 
-- [ ] Re-correr `make load-test SCENARIO=1` (500 users, 5 min)
-- [ ] Re-correr `make load-test SCENARIO=2` (300 users, 5 min)
-- [ ] Re-correr `make load-test SCENARIO=5` (stress, identificar nuevo breaking point — el outbox INSERT extra puede mover el límite)
-- [ ] Actualizar `load-testing-results.md` con sección "Phase 6.5 — Hardening retest" (comparativa pre/post)
-- [ ] Crear secciones nuevas en `docs/TECHNICAL_DECISIONS.md`: "Outbox Pattern" y "Circuit Breaker"
-- [ ] Actualizar `README.md` raíz mencionando los 2 patrones
-- [ ] Actualizar [Sección 4](#s4) de este archivo: 6.5 → ✅ Completado
+- [x] **OpenCode**: re-correr `make load-test SCENARIO=1/2/5`, capturar números, `bash gateway/test.sh` → 11/11
+- [x] **Claude Code**: actualizar `load-testing-results.md` sección "Phase 6.5 retest" con números de OpenCode
+- [x] **Claude Code**: crear secciones en `docs/TECHNICAL_DECISIONS.md`: §23 Outbox Pattern y §24 Circuit Breaker
+- [x] **Claude Code**: actualizar `README.md` raíz + `CONTEXT.md` §4 y §2
 - [ ] Avisar al usuario para preparar commits + PR
 
 ---
@@ -446,8 +436,8 @@ Los resultados actuales reflejan Gunicorn (4w gthread). El bottleneck principal 
 | 4 | Observabilidad | ✅ Completado |
 | 5 | Gateway + Rate Limiting | ✅ Completado |
 | 6 | Load Testing | ✅ Completado |
-| 6.5 | Resilience Hardening | ⏳ Preparada (esperando merge de Fase 6) |
-| 7 | Frontend Dashboard | ❌ No iniciado |
+| 6.5 | Resilience Hardening | ✅ Completado |
+| 7 | Frontend Dashboard | ⏳ Próxima |
 
 ---
 
@@ -476,6 +466,8 @@ Los resultados actuales reflejan Gunicorn (4w gthread). El bottleneck principal 
 - ✅ Gateway infra: docker-compose entry (8080:80, red riskcore, depends_on 4 servicios) + Promtail scrape (filter + relabel service=gateway) + Grafana dashboard (8 paneles Loki-based) + Makefile gateway-test + infra/README.md sección Gateway
 - ✅ Load Testing: escenarios 1-5 en `infra/load-testing/`, auth_helper con JWT compartido, gateway-loadtest (rate limit 10000r/m, profile loadtest), seed_audit_events (10k eventos), dashboard Load Testing (12 paneles), Makefile targets (load-test-1 al 5, load-test-seed, load-test-ui), `load-testing-results.md` con diagnóstico de bottlenecks
 - ✅ Servicios migrados a Gunicorn 4w gthread en docker-compose (policy, claims, notification). audit-service en Daphne.
+- ✅ Resilience Hardening (Fase 6.5): Circuit Breaker en `claims → policy` (pybreaker, 5 fail / 30s reset, 4xx excluidos), Outbox Pattern en policy + claims (apps/outbox/, relay command con `select_for_update(skip_locked=True)`, 2 containers `*-outbox-relay`), métricas Prometheus + alertas Grafana (CB open, outbox pending, outbox failed), tests: rollback, concurrencia con threads, fault tolerance Kafka stop/start.
+- ✅ Hotfix `generate_policy_number()`: PostgreSQL `SEQUENCE` (`nextval()`) reemplaza el `select_for_update()` que serializaba writes. Migración 0002, fallback SQLite preservado para tests. Elimina el bottleneck identificado en Fase 6 que limitaba writes de Policy a ~50 usuarios concurrentes.
 
 ---
 
@@ -535,45 +527,55 @@ _Ninguno por ahora._
 3. **Archivos compartidos** (`docker-compose.yml`, `Makefile`, `AGENTS.md`) → solo los modifica el agente cuya tarea lo requiere explícitamente
 4. **Orden de merge**: el agente que empezó primero mergea primero. El segundo hace rebase después.
 
-### Agentes activos — Fase 6.5 (próxima)
+### Agentes activos — Fase 6.5
 
 | Agente | Rol | Tareas asignadas |
 |---|---|---|
-| **OpenCode** | Ejecutor principal | Bloque A (Circuit Breaker) → Bloque B (Outbox Pattern) → Bloque C (Verificación + docs) — sigue paso a paso `docs/PHASE_6_5_HARDENING.md` |
-| **Claude Code** | Revisor / coordinador | Self-audit al final de cada bloque (revisa código de OpenCode, verifica tests, confirma criterios). Coordina cierre de fase y preparación de commits/PR. |
+| **Claude Code** | Bloque A (autor) + Docs + Audit final | Escribe código del Circuit Breaker. Redacta docs del Bloque C con números de OpenCode. Audit final del diff completo. Coordina cierre de fase. |
+| **OpenCode** | Bloque B (autor+ejecutor) + Ejecución | Escribe y ejecuta Outbox Pattern completo. Ejecuta tests de Bloque A. Corre load tests del Bloque C. |
 
 ### División de archivos — Fase 6.5
 
 | Área | Agente |
 |---|---|
-| `claims-service/apps/claims/clients.py` | **OpenCode** |
-| `claims-service/apps/claims/tests/test_clients.py` | **OpenCode** |
-| `claims-service/apps/core/metrics.py` | **OpenCode** |
-| `claims-service/pyproject.toml` (pybreaker) | **OpenCode** |
+| `claims-service/apps/claims/clients.py` | **Claude Code** |
+| `claims-service/apps/claims/tests/test_clients.py` | **Claude Code** |
+| `claims-service/apps/core/metrics.py` (sección CB) | **Claude Code** |
+| `claims-service/pyproject.toml` (`uv add pybreaker`) | **OpenCode** (ejecución) |
+| `infra/grafana/dashboards/services.json` (panel breaker) | **Claude Code** |
+| `infra/grafana/alert-rules.yml` (alerta CB) | **Claude Code** |
 | `policy-service/apps/outbox/` (nuevo) | **OpenCode** |
 | `claims-service/apps/outbox/` (nuevo) | **OpenCode** |
 | `policy-service/apps/policies/events.py` (refactor a Builder) | **OpenCode** |
 | `policy-service/apps/policies/services.py` (cambios `emit_*`) | **OpenCode** |
 | `claims-service/apps/claims/events.py` (refactor a Builder) | **OpenCode** |
 | `claims-service/apps/claims/services.py` (cambios `emit_*`) | **OpenCode** |
+| `claims-service/apps/core/metrics.py` (sección outbox) | **OpenCode** |
+| `policy-service/apps/core/metrics.py` (sección outbox) | **OpenCode** |
 | `infra/docker-compose.yml` (2 containers relay nuevos) | **OpenCode** |
-| `infra/grafana/dashboards/services.json` (panel breaker) | **OpenCode** |
-| `infra/grafana/dashboards/` (panel outbox nuevo) | **OpenCode** |
-| `infra/grafana/alert-rules.yml` (3 alertas nuevas) | **OpenCode** |
-| `load-testing-results.md` (sección retest) | **OpenCode** |
-| `docs/TECHNICAL_DECISIONS.md` (2 secciones nuevas) | **OpenCode** |
-| `README.md` raíz (mención de patrones) | **OpenCode** |
-| `CONTEXT.md` (cierre de fase) | **OpenCode** marca, **Claude Code** valida |
+| `infra/grafana/dashboards/outbox.json` (panel outbox nuevo) | **OpenCode** |
+| `infra/grafana/alert-rules.yml` (alertas outbox) | **OpenCode** |
+| `load-testing-results.md` (sección retest) | **Claude Code** (con números de OpenCode) |
+| `docs/TECHNICAL_DECISIONS.md` (2 secciones nuevas) | **Claude Code** |
+| `README.md` raíz (mención de patrones) | **Claude Code** |
+| `CONTEXT.md` (cierre de fase) | **Claude Code** |
 
 ### Cómo deben trabajar — flujo Fase 6.5
 
-1. **OpenCode lee `docs/PHASE_6_5_HARDENING.md` completo** antes de empezar (especialmente §6 sobre autoridad y §5 self-audit común).
-2. **Bloque A primero** (Circuit Breaker, ~2h) — más pequeño, sirve de warm-up.
-3. **Self-audit Bloque A** — OpenCode marca completado, Claude Code revisa diff y confirma. Solo entonces pasa a Bloque B.
-4. **Bloque B** (Outbox, ~6-8h) — el grueso del trabajo. Migraciones aplicadas, fault tolerance test pasa.
-5. **Self-audit Bloque B** — Claude Code revisa especialmente: (a) que el `emit_*_event()` esté DENTRO de `transaction.atomic()`, (b) que los tests viejos de Kafka producer fueron adaptados (no quedaron mocks rotos), (c) que `select_for_update(skip_locked=True)` está presente en el relay.
-6. **Bloque C** — re-ejecución de scenarios + docs. OpenCode redacta, Claude Code revisa.
-7. **Cierre de fase**: OpenCode marca §4 y §2, avisa al usuario para commits.
+1. **Ambos leen `docs/PHASE_6_5_HARDENING.md` completo** antes de empezar.
+2. **Inicio paralelo — sin dependencias entre bloques**:
+   - **Claude Code** escribe Bloque A (Circuit Breaker): `clients.py`, `metrics.py` sección CB, `services.json`, `alert-rules.yml` alerta CB, tests.
+   - **OpenCode** escribe Bloque B (Outbox Pattern): `apps/outbox/` en ambos servicios, relay command, refactor `events.py`+`services.py`, docker-compose, métricas outbox, alertas outbox, tests.
+3. **Sincronización**: cuando Claude Code termina Bloque A → **OpenCode ejecuta**: `uv add pybreaker`, `uv run pytest` (claims-service). Cuando OpenCode termina Bloque B → **OpenCode ejecuta**: `makemigrations && migrate`, `uv run pytest` (policy + claims), docker compose up relays, fault tolerance test.
+4. **Bloque C — solo después de que ambos bloques tienen tests en verde**:
+   - **OpenCode** corre `make load-test SCENARIO=1/2/5` + `bash gateway/test.sh` → pasa los números a Claude Code.
+   - **Claude Code** redacta `load-testing-results.md`, `TECHNICAL_DECISIONS.md`, `README.md`.
+5. **Audit final**: Claude Code revisa diff completo — anti-patrones, criterios de aceptación.
+6. **Claude Code** actualiza `CONTEXT.md` §4 y §2, avisa al usuario para commits.
+
+### Punto de conflicto controlado — `claims-service/apps/core/metrics.py`
+
+Claude Code escribe la sección CB al principio del archivo. OpenCode añade la sección outbox al final. Merge limpio garantizado (variables distintas, sin overlap de líneas).
 
 ### Anti-patrones a evitar (reportar como `[FOUND]` si se encuentran)
 

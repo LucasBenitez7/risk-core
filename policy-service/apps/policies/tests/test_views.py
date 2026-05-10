@@ -1,5 +1,3 @@
-from unittest.mock import MagicMock, patch
-
 import pytest
 from django.contrib.auth.models import User
 from rest_framework.test import APIClient
@@ -22,13 +20,6 @@ def api_client(user):
 @pytest.fixture
 def api_client_no_auth():
     return APIClient()
-
-
-@pytest.fixture
-def mock_kafka():
-    with patch("apps.policies.services._get_producer") as mock:
-        mock.return_value = MagicMock()
-        yield mock
 
 
 @pytest.mark.django_db
@@ -109,10 +100,6 @@ class TestCustomerViews:
 
 @pytest.mark.django_db
 class TestPolicyViews:
-    @pytest.fixture(autouse=True)
-    def _mock_kafka(self, mock_kafka):
-        pass
-
     def test_create_policy_201(self, api_client):
         customer = Customer.objects.create(
             full_name="Policy User", email="policy@test.com", dni="88888888H"

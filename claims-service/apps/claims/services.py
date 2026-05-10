@@ -3,17 +3,12 @@ from django.db import transaction
 from rest_framework.exceptions import ValidationError
 
 from apps.claims.clients import PolicyServiceClient
+from apps.claims.events import ClaimEventBuilder, emit_claim_event
 from apps.claims.models import Claim, ClaimStatusHistory
 from apps.core.exceptions import InvalidClaimStatusError
 from apps.core.metrics import claims_filed_total, claims_status_changed_total
 
 logger = structlog.get_logger()
-
-
-def _get_producer():
-    from apps.claims.events import ClaimEventProducer
-
-    return ClaimEventProducer()
 
 
 class ClaimService:
@@ -47,7 +42,8 @@ class ClaimService:
                 notes="Siniestro reportado",
             )
 
-        _get_producer().produce_claim_filed(claim)
+            emit_claim_event(claim, "claim.filed", ClaimEventBuilder.build_filed(claim))
+
         claims_filed_total.labels(incident_type=claim.incident_type).inc()
         logger.info(
             "claim_filed",
@@ -103,25 +99,22 @@ class ClaimService:
                 notes=notes,
             )
 
-        _get_producer().produce_claim_status_changed(claim, current_status)
+            emit_claim_event(
+                claim,
+                "claim.status_changed",
+                ClaimEventBuilder.build_status_changed(
+                    claim, current_status, new_status
+                ),
+            )
+
+            if new_status == Claim.Status.RESOLVED:
+                emit_claim_event(
+                    claim, "claim.resolved", ClaimEventBuilder.build_resolved(claim)
+                )
+
         claims_status_changed_total.labels(
             from_status=current_status, to_status=new_status
         ).inc()
-        logger.info(
-            "claim_status_changed",
-            claim_number=claim.claim_number,
-            claim_id=str(claim.id),
-            from_status=current_status,
-            to_status=new_status,
-        )
-
-        if new_status == Claim.Status.RESOLVED:
-            _get_producer().produce_claim_resolved(claim)
-            logger.info(
-                "claim_resolved",
-                claim_number=claim.claim_number,
-                claim_id=str(claim.id),
-            )
 
         return claim
 

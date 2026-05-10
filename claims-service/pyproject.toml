@@ -18,6 +18,7 @@ dependencies = [
     "django-unfold>=0.89,<0.90",
     "httpx>=0.28,<0.29",
     "gunicorn>=26.0.0",
+    "pybreaker>=1.4.1",
 ]
 
 [project.optional-dependencies]

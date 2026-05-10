@@ -233,6 +233,57 @@ services:
     networks:
       - riskcore
 
+  # ─── Outbox Relays ────────────────────────────────
+  policy-outbox-relay:
+    build:
+      context: ../policy-service
+    command: ["uv", "run", "python", "manage.py", "run_outbox_relay"]
+    env_file: ../policy-service/.env
+    environment:
+      - SECRET_KEY=dev-secret-key
+      - DEBUG=True
+      - DB_NAME=riskcore_policies
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - DJANGO_SETTINGS_MODULE=config.settings.development
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - riskcore
+    restart: unless-stopped
+
+  claims-outbox-relay:
+    build:
+      context: ../claims-service
+    command: ["uv", "run", "python", "manage.py", "run_outbox_relay"]
+    env_file: ../claims-service/.env
+    environment:
+      - SECRET_KEY=dev-secret-key
+      - DEBUG=True
+      - DB_NAME=riskcore_claims
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - POLICY_SERVICE_URL=http://policy-web:8001
+      - POLICY_SERVICE_TIMEOUT=5
+      - DJANGO_SETTINGS_MODULE=config.settings.development
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - riskcore
+    restart: unless-stopped
+
   # ─── Loki ────────────────────────────────────────
   loki:
     image: grafana/loki:2.9.14

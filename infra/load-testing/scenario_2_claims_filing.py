@@ -86,7 +86,7 @@ def on_test_start(environment, **kwargs):
         customer_id = r.json()["id"]
 
         pol_payload = {
-            "customer": customer_id,
+            "customer_id": customer_id,
             "policy_type": random.choice(POLICY_TYPES),
             "premium_amount": str(round(random.uniform(200, 3000), 2)),
             "start_date": start.isoformat(),

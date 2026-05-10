@@ -19,6 +19,13 @@ notification-service (8003)┤── Kafka ──► audit-service (8004)
 | notification-service | 8003 | Async emails via Celery |
 | audit-service | 8004 | Immutable event log + WebSocket streaming |
 
+### Resilience patterns
+
+- **Outbox Pattern** (policy-service, claims-service) — events are written to an `OutboxEvent` table inside the same transaction as the aggregate, then a separate relay container publishes them to Kafka. Eliminates the dual-write problem and guarantees at-least-once delivery even if Kafka is temporarily unreachable.
+- **Circuit Breaker** (claims → policy via `pybreaker`) — after 5 consecutive infrastructure failures (5xx, timeouts) the breaker opens for 30s and subsequent calls fail fast, preventing worker saturation under prolonged upstream degradation. 4xx errors are excluded from the failure count.
+
+See [docs/TECHNICAL_DECISIONS.md §23–24](docs/TECHNICAL_DECISIONS.md) for the full rationale.
+
 ## Quick Start
 
 ```bash
@@ -89,9 +96,9 @@ riskcore/
 
 ## Status
 
-Phase 0 — Setup e Infraestructura (in progress)
+Phases 0–6.5 complete. Currently: hardening (Outbox + Circuit Breaker) merged, Phase 7 (frontend) pending.
 
-See [CONTEXT.md](CONTEXT.md) for current project state.
+See [CONTEXT.md](CONTEXT.md) for the live project state.
 
 ## License
 

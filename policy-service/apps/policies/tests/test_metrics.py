@@ -1,5 +1,3 @@
-from unittest.mock import MagicMock, patch
-
 import pytest
 from prometheus_client import REGISTRY
 
@@ -9,13 +7,6 @@ from apps.policies.services import PolicyService
 
 def _counter(name: str, labels: dict) -> float:
     return REGISTRY.get_sample_value(name, labels) or 0.0
-
-
-@pytest.fixture(autouse=True)
-def mock_kafka():
-    with patch("apps.policies.services._get_producer") as mock:
-        mock.return_value = MagicMock()
-        yield mock
 
 
 @pytest.mark.django_db

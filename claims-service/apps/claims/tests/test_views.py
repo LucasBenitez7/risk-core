@@ -1,6 +1,6 @@
 import uuid
 from decimal import Decimal
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from django.contrib.auth.models import User
@@ -24,13 +24,6 @@ def api_client(user):
 @pytest.fixture
 def api_client_no_auth():
     return APIClient()
-
-
-@pytest.fixture(autouse=True)
-def mock_kafka():
-    with patch("apps.claims.services._get_producer") as mock:
-        mock.return_value = MagicMock()
-        yield mock
 
 
 @pytest.fixture

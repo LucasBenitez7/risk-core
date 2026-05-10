@@ -9,15 +9,10 @@ from apps.core.exceptions import (
     PolicyNotFoundError,
 )
 from apps.core.metrics import policies_cancelled_total, policies_created_total
+from apps.policies.events import PolicyEventBuilder, emit_policy_event
 from apps.policies.models import Coverage, Customer, Policy
 
 logger = structlog.get_logger()
-
-
-def _get_producer():
-    from apps.policies.events import PolicyEventProducer
-
-    return PolicyEventProducer()
 
 
 class PolicyService:
@@ -65,7 +60,10 @@ class PolicyService:
                 ]
                 Coverage.objects.bulk_create(coverages)
 
-        _get_producer().produce_policy_created(policy)
+            emit_policy_event(
+                policy, "policy.created", PolicyEventBuilder.build_created(policy)
+            )
+
         policies_created_total.labels(policy_type=policy.policy_type).inc()
         logger.info(
             "policy_created",
@@ -95,7 +93,10 @@ class PolicyService:
             policy.cancellation_reason = reason
             policy.save(update_fields=["status", "cancellation_reason", "updated_at"])
 
-        _get_producer().produce_policy_cancelled(policy)
+            emit_policy_event(
+                policy, "policy.cancelled", PolicyEventBuilder.build_cancelled(policy)
+            )
+
         policies_cancelled_total.inc()
         logger.info(
             "policy_cancelled",
@@ -120,8 +121,11 @@ class PolicyService:
 
         if changed_fields:
             changed_fields.append("updated_at")
-            policy.save(update_fields=changed_fields)
-            _get_producer().produce_policy_updated(policy)
+            with transaction.atomic():
+                policy.save(update_fields=changed_fields)
+                emit_policy_event(
+                    policy, "policy.updated", PolicyEventBuilder.build_updated(policy)
+                )
 
         return policy
 

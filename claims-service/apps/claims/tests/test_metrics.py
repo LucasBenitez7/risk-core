@@ -14,13 +14,6 @@ def _counter(name: str, labels: dict) -> float:
 
 
 @pytest.fixture(autouse=True)
-def mock_kafka():
-    with patch("apps.claims.services._get_producer") as mock:
-        mock.return_value = MagicMock()
-        yield mock
-
-
-@pytest.fixture(autouse=True)
 def mock_policy_client():
     with patch("apps.claims.services.PolicyServiceClient") as mock:
         client = MagicMock()

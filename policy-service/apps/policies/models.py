@@ -1,6 +1,6 @@
 import uuid
 
-from django.db import models, transaction
+from django.db import connection, models, transaction
 from django.utils import timezone
 
 
@@ -22,8 +22,21 @@ class Customer(models.Model):
 
 
 def generate_policy_number():
+    """Generate the next sequential policy_number.
+
+    On PostgreSQL we use a native SEQUENCE — `nextval()` is lock-free and
+    scales linearly with concurrent INSERTs. On SQLite (test backend) we keep
+    the legacy `select_for_update()` path: SQLite serializes writes at the
+    file level anyway, so contention is not an issue in tests.
+    """
     year = timezone.now().year
     prefix = f"POL-{year}-"
+
+    if connection.vendor == "postgresql":
+        with connection.cursor() as cur:
+            cur.execute("SELECT nextval('policy_number_seq')")
+            next_num = cur.fetchone()[0]
+        return f"{prefix}{next_num:06d}"
 
     with transaction.atomic():
         last = (
@@ -32,12 +45,7 @@ def generate_policy_number():
             .order_by("-policy_number")
             .first()
         )
-        if last:
-            last_num = int(last.policy_number.split("-")[-1])
-            next_num = last_num + 1
-        else:
-            next_num = 1
-
+        next_num = int(last.policy_number.split("-")[-1]) + 1 if last else 1
     return f"{prefix}{next_num:06d}"
 
 
