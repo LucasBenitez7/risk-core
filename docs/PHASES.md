@@ -17,10 +17,13 @@
 | 4    | Observabilidad                       | 1 día    | `feat/phase-4-observability`  |
 | 5    | Gateway + Rate Limiting              | 0.5 día  | `feat/phase-5-gateway`        |
 | 6    | Load Testing                         | 0.5 día  | `feat/phase-6-load-testing`   |
+| 6.5  | Resilience Hardening                 | 1 día    | `feat/phase-6-5-hardening`    |
 | 7    | Frontend Dashboard                   | 1 día    | `feat/phase-7-frontend`       |
 
 
-**Total estimado**: ~8 días trabajando en paralelo con la búsqueda de empleo.
+**Total estimado**: ~9 días trabajando en paralelo con la búsqueda de empleo.
+
+**Nota sobre Fase 6.5**: añadida tras Fase 6 al detectarse en load testing un bottleneck real (`select_for_update()` en `generate_policy_number()`) y dos gaps de resiliencia frecuentes en arquitecturas event-driven (dual-write entre DB y Kafka, ausencia de circuit breaker en HTTP inter-service). El plan completo vive en `docs/PHASE_6_5_HARDENING.md`.
 
 ---
 
@@ -791,6 +794,50 @@ open http://localhost:3000   # Grafana con todos los dashboards cargados
 
 - Crear PR de `feat/phase-6-load-testing` → `dev`
 - `load-testing-results.md` incluido en el PR con los números reales
+- Mergear tras CI verde
+- Crear rama `feat/phase-7-frontend` desde `dev`
+
+---
+
+## Fase 6.5 — Resilience Hardening
+
+**Rama**: `feat/phase-6-5-hardening`
+**Estimado**: 1 día
+
+**Objetivo**: aplicar dos patrones de resiliencia clásicos en arquitecturas event-driven que diferencian un sistema "demo" de un sistema "production-grade": Outbox Pattern (elimina dual-write entre DB y Kafka) y Circuit Breaker (en la llamada HTTP claims→policy).
+
+**Plan detallado**: `docs/PHASE_6_5_HARDENING.md` — incluye 3 bloques (Circuit Breaker → Outbox → Verificación), código de referencia, tests obligatorios, métricas Prometheus nuevas y self-audit por bloque.
+
+### Entregables
+
+**Circuit Breaker (`pybreaker`)**
+
+- `claims-service/apps/claims/clients.py` refactorizado con `@_policy_breaker` decorator
+- Excepción interna `_ClientBusinessError` para excluir 4xx del conteo de fallos
+- Métricas: `circuit_breaker_state` (gauge) + `circuit_breaker_state_changes_total` (counter)
+- Alerta Grafana: `PolicyCircuitBreakerOpen for 2m`
+- Tests: 5 fallos consecutivos → circuito abre, 404 no cuenta, recovery tras `reset_timeout`
+
+**Outbox Pattern (policy-service + claims-service)**
+
+- App Django `apps/outbox/` en ambos servicios con modelo `OutboxEvent` (índice parcial PostgreSQL `WHERE status='PENDING'`)
+- Management command `run_outbox_relay` con `select_for_update(skip_locked=True)` (soporta múltiples relays concurrentes)
+- Refactor de productores: `PolicyEventProducer` → `PolicyEventBuilder` (solo construye payloads) + `emit_policy_event()` (escribe al outbox dentro de la transacción)
+- 2 containers nuevos en docker-compose: `policy-outbox-relay`, `claims-outbox-relay`
+- Métricas: `outbox_pending_total`, `outbox_published_total{topic}`, `outbox_lag_seconds`
+- Alertas: `OutboxPendingHigh > 1000 for 5m`, `OutboxEventFailed`
+- Tests: rollback no deja eventos, relay publica correctamente, fault tolerance (Kafka caído → API responde 201, evento queda PENDING, se publica al recovery)
+
+**Verificación final**
+
+- Re-correr scenarios 1, 2, 5 con outbox + breaker activos
+- Actualizar `load-testing-results.md` con sección "Phase 6.5 retest"
+- Actualizar `docs/TECHNICAL_DECISIONS.md` con secciones Outbox y Circuit Breaker
+
+**Al finalizar la fase**
+
+- Crear PR de `feat/phase-6-5-hardening` → `dev`
+- PR title: `[Phase 6.5] resilience: outbox pattern and circuit breaker for production-grade event delivery`
 - Mergear tras CI verde
 - Crear rama `feat/phase-7-frontend` desde `dev`
 
