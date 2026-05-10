@@ -237,8 +237,7 @@ services:
   policy-outbox-relay:
     build:
       context: ../policy-service
-    command: ["uv", "run", "python", "manage.py", "run_outbox_relay"]
-    env_file: ../policy-service/.env
+    command: ["python", "manage.py", "run_outbox_relay"]
     environment:
       - SECRET_KEY=dev-secret-key
       - DEBUG=True
@@ -261,8 +260,7 @@ services:
   claims-outbox-relay:
     build:
       context: ../claims-service
-    command: ["uv", "run", "python", "manage.py", "run_outbox_relay"]
-    env_file: ../claims-service/.env
+    command: ["python", "manage.py", "run_outbox_relay"]
     environment:
       - SECRET_KEY=dev-secret-key
       - DEBUG=True

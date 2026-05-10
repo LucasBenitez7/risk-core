@@ -175,14 +175,12 @@ class TestRelayProcessBatch:
 
 @pytest.mark.django_db
 class TestConcurrency:
-    @pytest.mark.skipif(
-        "sqlite3"
-        in __import__("django.conf", fromlist=["settings"]).settings.DATABASES[
-            "default"
-        ]["ENGINE"],
-        reason="SQLite does not support select_for_update(skip_locked)",
-    )
     def test_skip_locked_prevents_double_publish(self):
+        from django.conf import settings
+
+        if "sqlite3" in settings.DATABASES["default"]["ENGINE"]:
+            pytest.skip("SQLite does not support select_for_update(skip_locked)")
+
         OutboxEvent.objects.create(
             aggregate_type="claim",
             aggregate_id=uuid.uuid4(),

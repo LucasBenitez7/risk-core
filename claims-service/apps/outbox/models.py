@@ -29,7 +29,6 @@ class OutboxEvent(models.Model):
             models.Index(
                 fields=["status", "created_at"],
                 name="outbox_pending_idx",
-                condition=models.Q(status="PENDING"),
             ),
         ]
         ordering = ["created_at"]

@@ -51,7 +51,6 @@ class Migration(migrations.Migration):
                 "ordering": ["created_at"],
                 "indexes": [
                     models.Index(
-                        condition=models.Q(("status", "PENDING")),
                         fields=["status", "created_at"],
                         name="outbox_pending_idx",
                     )
