@@ -1,4 +1,7 @@
 from rest_framework.mixins import ListModelMixin, RetrieveModelMixin
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.views import APIView
 from rest_framework.viewsets import GenericViewSet
 
 from apps.core.exceptions import NotificationNotFoundError
@@ -6,8 +9,18 @@ from apps.core.pagination import StandardPagination
 from apps.notifications.models import Notification
 from apps.notifications.serializers import (
     NotificationListSerializer,
+    NotificationMetricsSerializer,
     NotificationSerializer,
 )
+from apps.notifications.services import NotificationMetricsService
+
+
+class NotificationMetricsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        data = NotificationMetricsService().get_metrics()
+        return Response(NotificationMetricsSerializer(data).data)
 
 
 class NotificationViewSet(RetrieveModelMixin, ListModelMixin, GenericViewSet):

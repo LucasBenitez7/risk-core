@@ -116,3 +116,29 @@ class TestNotificationRetrieveView:
             f"/api/notifications/notifications/{sent_notification.id}/"
         )
         assert response.status_code == 401
+
+
+@pytest.mark.django_db
+class TestNotificationMetricsView:
+    def test_metrics_returns_200_with_schema(self, api_client):
+        response = api_client.get("/api/notifications/metrics/")
+        assert response.status_code == 200
+        data = response.data
+        assert "sent_today" in data
+        assert "failed_today" in data
+        assert "pending" in data
+        assert "success_rate_7d" in data
+        assert isinstance(data["sent_today"], int)
+        assert isinstance(data["success_rate_7d"], float)
+
+    def test_metrics_requires_auth(self):
+        from rest_framework.test import APIClient
+
+        response = APIClient().get("/api/notifications/metrics/")
+        assert response.status_code == 401
+
+    def test_success_rate_100_when_no_data(self, api_client):
+        response = api_client.get("/api/notifications/metrics/")
+        assert response.status_code == 200
+        assert response.data["success_rate_7d"] == 100.0
+        assert response.data["pending"] == 0
