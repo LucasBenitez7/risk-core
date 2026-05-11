@@ -1,0 +1,80 @@
+name: CI — Infra
+
+on:
+  push:
+    paths:
+      - "infra/**"
+      - ".github/workflows/ci-infra.yml"
+  pull_request:
+    paths:
+      - "infra/**"
+      - ".github/workflows/ci-infra.yml"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate docker-compose syntax
+        run: docker compose -f infra/docker-compose.yml config --quiet
+
+      - name: Validate Grafana dashboard JSONs
+        run: |
+          for f in infra/grafana/dashboards/*.json; do
+            python -m json.tool "$f" > /dev/null && echo "  OK $f" || { echo "  FAIL $f"; exit 1; }
+          done
+
+      - name: Validate Grafana provisioning YAMLs
+        run: |
+          pip install pyyaml
+          python -c "
+          import yaml, sys, os
+          ok = True
+          for root, _, files in os.walk('infra/grafana/provisioning'):
+              for f in files:
+                  if f.endswith(('.yml', '.yaml')):
+                      path = os.path.join(root, f)
+                      try:
+                          with open(path) as fh:
+                              yaml.safe_load(fh)
+                          print(f'  OK {path}')
+                      except Exception as e:
+                          print(f'  FAIL {path}: {e}')
+                          ok = False
+          sys.exit(0 if ok else 1)
+          "
+
+      - name: Validate Prometheus config
+        run: |
+          docker run --rm --entrypoint promtool \
+            -v "$(pwd)/infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro" \
+            prom/prometheus:v2.55.1 check config /etc/prometheus/prometheus.yml
+
+      - name: Validate Loki config syntax
+        run: |
+          pip install pyyaml
+          python -c "
+          import yaml, sys
+          try:
+              with open('infra/loki/loki-config.yml') as f:
+                  yaml.safe_load(f)
+              print('  OK infra/loki/loki-config.yml')
+          except Exception as e:
+              print(f'  FAIL: {e}')
+              sys.exit(1)
+          "
+
+      - name: Validate Promtail config syntax
+        run: |
+          pip install pyyaml
+          python -c "
+          import yaml, sys
+          try:
+              with open('infra/promtail/promtail-config.yml') as f:
+                  yaml.safe_load(f)
+              print('  OK infra/promtail/promtail-config.yml')
+          except Exception as e:
+              print(f'  FAIL: {e}')
+              sys.exit(1)
+          "

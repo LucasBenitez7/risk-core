@@ -1,0 +1,69 @@
+name: CI — Notification Service
+
+on:
+  push:
+    paths:
+      - "notification-service/**"
+      - ".github/workflows/ci-notification-service.yml"
+  pull_request:
+    paths:
+      - "notification-service/**"
+      - ".github/workflows/ci-notification-service.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: riskcore_notifications
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7.2
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install uv
+        run: pip install uv
+      - name: Install dependencies
+        working-directory: notification-service
+        run: uv sync --extra dev
+      - name: Ruff
+        working-directory: notification-service
+        run: uv run ruff check .
+      - name: Mypy
+        working-directory: notification-service
+        run: uv run mypy . --ignore-missing-imports || true
+      - name: Bandit
+        working-directory: notification-service
+        run: uv run bandit -r apps/ -ll
+      - name: Pytest
+        working-directory: notification-service
+        env:
+          SECRET_KEY: ci-secret
+          DB_NAME: riskcore_notifications
+          DB_USER: postgres
+          DB_PASSWORD: postgres
+          DB_HOST: localhost
+          DB_PORT: 5432
+          REDIS_URL: redis://localhost:6379/0
+        run: uv run pytest --cov=apps --cov-report=term-missing

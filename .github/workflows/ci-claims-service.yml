@@ -1,0 +1,59 @@
+name: CI — Claims Service
+
+on:
+  push:
+    paths:
+      - "claims-service/**"
+      - ".github/workflows/ci-claims-service.yml"
+  pull_request:
+    paths:
+      - "claims-service/**"
+      - ".github/workflows/ci-claims-service.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: riskcore_claims
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install uv
+        run: pip install uv
+      - name: Install dependencies
+        working-directory: claims-service
+        run: uv sync --extra dev
+      - name: Ruff
+        working-directory: claims-service
+        run: uv run ruff check .
+      - name: Mypy
+        working-directory: claims-service
+        run: uv run mypy . --ignore-missing-imports || true
+      - name: Bandit
+        working-directory: claims-service
+        run: uv run bandit -r apps/ -ll
+      - name: Pytest
+        working-directory: claims-service
+        env:
+          SECRET_KEY: ci-secret
+          DB_NAME: riskcore_claims
+          DB_USER: postgres
+          DB_PASSWORD: postgres
+          DB_HOST: localhost
+          DB_PORT: 5432
+        run: uv run pytest --cov=apps --cov-report=term-missing

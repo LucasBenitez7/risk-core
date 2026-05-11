@@ -133,5 +133,5 @@ class Command(BaseCommand):
 - [ ] Consumer group ID es único por servicio: `[servicio]-consumers`
 - [ ] Mensajes lentos (emails, etc.) se delegan a Celery task, nunca en el consumer
 - [ ] Nuevo topic añadido al script `infra/kafka/create-topics.sh`
-- [ ] Nuevo topic documentado en la tabla de `PLAN_COMPLETO.md` y `CLAUDE.md`
+- [ ] Nuevo topic documentado en la tabla de Kafka topics de `AGENTS.md`
 - [ ] Tests del consumer en `tests/test_consumers.py` con Kafka mockeado

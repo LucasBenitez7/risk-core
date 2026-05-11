@@ -1,198 +1,21 @@
-# RiskCore — Project Rules for AI Agents (Cline / OpenCode)
+# RiskCore — Rules for Cline / OpenCode Agents
 
-## Project Overview
-Insurance microservices backend portfolio project. 4 Django microservices + Next.js 15 dashboard + Kafka event-driven architecture.
+> This file is auto-loaded by Cline / OpenCode at session start.
+> Project rules live elsewhere.
 
-> 📍 **Read `CONTEXT.md` first** — it has the current project state, active phase, and next step.
+## Read first, in this order
 
-**Full context in `CLAUDE.md`** — read it first every session.
-- Business domain: `docs/GUIA_PROYECTO.md`
-- Technical decisions: `docs/TECHNICAL_DECISIONS.md`
-- API schemas: `docs/API_DESIGN.md`
-- Dev phases: `docs/PHASES.md`
+1. **`CONTEXT.md`** — current state, active phase, plan with checkboxes, phase-specific rules. **ALWAYS read first.**
+2. **`AGENTS.md`** — permanent project rules, stack, patterns, ways of working, "NEVER do this", Git workflow, PR format.
 
----
+`AGENTS.md` is the source of truth for rules. This file is just the entry point for Cline / OpenCode (follows the open [agents.md](https://agents.md) convention).
 
-## Tech Stack — Exact Versions
+## Minimum rules you cannot skip (full detail in `AGENTS.md`)
 
-### Backend (per-service pyproject.toml)
-- Python 3.13, **uv (latest stable)** — package manager, replaces pip/virtualenv/pip-tools entirely
-- Django 5.2.x LTS, DRF 3.15.2
-- **confluent-kafka 2.6.x** — never use kafka-python
-- Celery 5.4.x + Redis 7.2.x
-- PostgreSQL 16.x — one DB per service, never shared
-- psycopg3 binary 3.3.x
-- structlog 25.x for JSON logs, django-prometheus 0.3.x for metrics
-- Django Channels 4.1.x + channels-redis 4.2.x
-- **Ruff 0.15.x** — linting + formatting, replaces flake8/black/isort entirely
-- mypy 1.20.x + django-stubs 6.0.x
-- pytest 9.x + pytest-django 4.12.x + factory-boy
+- **NEVER** `git commit` or `git push` without explicit user permission
+- Business logic in `services.py`, never in `views.py`
+- `confluent-kafka` never `kafka-python` · `uv` never `pip` · `Ruff` never `flake8`/`black` · `pnpm` never `npm`/`yarn`
+- Self-audit mandatory before the tests step (see §"Self-Audit" in AGENTS.md)
+- PR title and description always in **English**, formatted for copy-paste into GitHub (see §"Pull Requests" in AGENTS.md)
 
-### Frontend
-- Next.js 15.5.9 App Router, React 19, TypeScript 5.9.x
-- **pnpm 10.24.0** — never npm or yarn
-- Tailwind CSS 4.x, Radix UI, Zustand 5.x, Zod 4.x
-- Vitest 4.x + Playwright 1.58.x
-
----
-
-## Architecture
-
-### Services & Ports
-- policy-service:8001 → customers and policies
-- claims-service:8002 → claims lifecycle
-- notification-service:8003 → async email via Celery
-- audit-service:8004 → immutable event log
-
-### Communication Rules
-- Default: async via Kafka topics (`policy.*`, `claim.*`)
-- Only sync HTTP: claims-service → policy-service (verify policy before creating claim)
-- Zero database sharing between services
-- No new sync HTTP endpoints between services — use Kafka
-
-### Service Internal Structure
-```
-apps/core/             # health, exceptions, pagination, middleware
-apps/[domain]/
-  models.py            # ORM only — no logic
-  serializers.py       # DRF schemas
-  views.py             # Thin — call service, return response
-  services.py          # ALL business logic here
-  events.py            # Kafka producers
-  consumers.py         # Kafka consumers (management command)
-  tasks.py             # Celery tasks (notification-service only)
-  clients.py           # HTTP client (claims-service only)
-  tests/               # test_models.py, test_services.py, test_views.py
-```
-
----
-
-## Mandatory Patterns
-
-### views.py must be thin — logic goes in services.py
-```python
-# CORRECT
-def cancel(self, request, pk):
-    policy = get_object_or_404(Policy, pk=pk)
-    result = PolicyService().cancel_policy(policy, reason=request.data.get("reason"))
-    return Response(PolicySerializer(result).data)
-```
-
-### Kafka event schema — always this envelope
-```python
-{
-    "event_id": str(uuid.uuid4()),
-    "event_type": "policy.created",
-    "occurred_at": timezone.now().isoformat(),
-    "service": "policy-service",
-    "data": { ... }
-}
-```
-
-### HTTP inter-service — always httpx with 5s timeout
-```python
-async with httpx.AsyncClient(timeout=5.0) as client:
-    response = await client.get(f"{POLICY_SERVICE_URL}/verify/")
-# timeout → 503 response, invalid policy → 400 response
-```
-
-### Structured logs — always pass request_id
-```python
-logger.info("event_name", entity_id=str(obj.id), request_id=request.headers.get("X-Request-ID"))
-```
-
-### Error format — same across all services
-```json
-{"error": {"code": "ERROR_CODE", "message": "Business language.", "details": {}}, "request_id": "uuid"}
-```
-
-### Settings split by environment
-```
-config/settings/base.py   development.py   production.py   test.py
-```
-Environment variables always via `python-decouple`. Never hardcode.
-
----
-
-## Business Rules
-
-### Claims State Machine
-```
-FILED → UNDER_REVIEW → APPROVED → RESOLVED
-                    └→ REJECTED → RESOLVED
-```
-- Only service.py changes state, never a direct PATCH on status field
-- Each transition saves ClaimStatusHistory record
-- Each transition emits Kafka claim.status_changed event
-- Invalid transitions return 400 with valid options listed
-
-### AuditEvent — Append Only (regulatory requirement)
-Never update or delete AuditEvent records. Only INSERT.
-audit-service has no UpdateAPIView or DestroyAPIView.
-
-### Policy Verification Before Claim Creation
-claims-service MUST call policy-service /verify/ endpoint before creating any Claim.
-Cancelled, expired, or nonexistent policy → 400 error, claim not created.
-
----
-
-## Testing
-
-### Mock in unit tests
-- confluent_kafka.Producer
-- httpx.AsyncClient (inter-service calls)
-- django.core.mail
-
-### Do NOT mock in integration tests
-- PostgreSQL (use real DB with @pytest.mark.django_db)
-- Redis (use real Redis for Channels/Celery tests)
-
-### Coverage: services.py 90%+, views.py 80%+, consumers.py 80%+
-Write tests alongside the feature, not after the phase is done.
-
----
-
-## Git — Workflow and Rules
-
-### CRITICAL: Never commit or push without explicit user permission
-Before any `git commit` or `git push`, always ask the user and wait for confirmation.
-"Implement X" does NOT include permission to commit.
-Read-only (always OK): `git status`, `git diff`, `git log`, `git branch`
-
-### Branches
-```
-main                ← production, protected — no direct commits ever
-dev                 ← integration — receives PRs from feat branches
-feat/phase-N-name   ← one branch per development phase
-```
-
-### Conventional commits (required)
-```
-feat(policy): add cancellation endpoint
-fix(claims): validate policy status before filing
-chore(infra): add kafka topic creation script
-test(audit): add consumer integration tests
-docs(api): update claims endpoint schemas
-```
-Valid scopes: `policy`, `claims`, `notifications`, `audit`, `infra`, `frontend`, `gateway`, `api`
-
-### Commit grouping — one logical change per commit
-Group related changes together. Never mix unrelated files in one commit.
-
----
-
-## Absolute Rules — Never Break
-
-1. **Never commit/push without explicit user permission** — always ask first
-2. Never commit directly to main or dev — always use feat branches
-3. No shared databases between services (Database per Service pattern)
-4. No business logic in views.py — always in services.py
-5. Use confluent-kafka, never kafka-python
-6. No hardcoded secrets — always python-decouple
-7. AuditEvent is append-only, never modify or delete
-8. No new inter-service HTTP calls — use Kafka
-9. Kafka consumers delegate slow work to Celery tasks
-10. Rate limiting in Nginx, not Django
-11. Use Ruff for linting/formatting, not flake8/black
-12. Use pnpm in frontend, never npm/yarn
-13. Use uv for Python package management, never pip install or requirements.txt
+## For everything else → `AGENTS.md`

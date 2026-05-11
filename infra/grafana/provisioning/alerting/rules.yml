@@ -1,0 +1,388 @@
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: RiskCore
+    folder: RiskCore
+    interval: 60s
+    rules:
+      - uid: alert-service-down
+        title: Service Down
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 60
+              to: 0
+            datasourceUid: PBFA97CFB590B2093
+            model:
+              editorMode: code
+              expr: 'up{job=~".*-service"}'
+              instant: true
+              range: false
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 60
+              to: 0
+            datasourceUid: __expr__
+            model:
+              expression: A
+              reducer: last
+              refId: B
+              type: reduce
+          - refId: C
+            relativeTimeRange:
+              from: 60
+              to: 0
+            datasourceUid: __expr__
+            model:
+              expression: B
+              refId: C
+              type: threshold
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: lt
+                  operator:
+                    type: and
+                  query:
+                    params: []
+                  type: query
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 30s
+        annotations:
+          summary: "Service {{ $labels.job }} is DOWN"
+          description: "The {{ $labels.job }} service has been unreachable for more than 30 seconds."
+        labels:
+          severity: critical
+        isPaused: false
+
+      - uid: alert-circuit-breaker-open
+        title: Policy Circuit Breaker Open
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: PBFA97CFB590B2093
+            model:
+              editorMode: code
+              expr: 'circuit_breaker_state{target="policy-service"}'
+              instant: true
+              range: false
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: __expr__
+            model:
+              expression: A
+              reducer: last
+              refId: B
+              type: reduce
+          - refId: C
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: __expr__
+            model:
+              expression: B
+              refId: C
+              type: threshold
+              conditions:
+                - evaluator:
+                    params: [1]
+                    type: gte
+                  operator:
+                    type: and
+                  query:
+                    params: []
+                  type: query
+        noDataState: NoData
+        execErrState: Error
+        for: 2m
+        annotations:
+          summary: "Circuit breaker policy-service OPEN"
+          description: "claims-service cannot reach policy-service for 2+ minutes. Calls are failing fast."
+        labels:
+          severity: warning
+        isPaused: false
+
+      - uid: alert-high-error-rate
+        title: High Error Rate
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: PBFA97CFB590B2093
+            model:
+              editorMode: code
+              expr: |
+                sum(rate(django_http_responses_total_by_status_total{job=~".*-service",status=~"5.."}[5m])) by (job)
+                /
+                sum(rate(django_http_responses_total_by_status_total{job=~".*-service"}[5m])) by (job)
+                * 100
+              instant: true
+              range: false
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: __expr__
+            model:
+              expression: A
+              reducer: last
+              refId: B
+              type: reduce
+          - refId: C
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: __expr__
+            model:
+              expression: B
+              refId: C
+              type: threshold
+              conditions:
+                - evaluator:
+                    params: [5]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: []
+                  type: query
+        noDataState: NoData
+        execErrState: Error
+        for: 2m
+        annotations:
+          summary: "High error rate on {{ $labels.job }}"
+          description: "{{ $labels.job }} error rate is above 5% for the last 2 minutes."
+        labels:
+          severity: warning
+        isPaused: false
+
+      - uid: alert-kafka-consumer-stalled
+        title: Kafka Consumer Stalled
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: PBFA97CFB590B2093
+            model:
+              editorMode: code
+              expr: 'rate(riskcore_kafka_messages_processed_total{result="ok"}[10m])'
+              instant: true
+              range: false
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: __expr__
+            model:
+              expression: A
+              reducer: last
+              refId: B
+              type: reduce
+          - refId: C
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: __expr__
+            model:
+              expression: B
+              refId: C
+              type: threshold
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: lte
+                  operator:
+                    type: and
+                  query:
+                    params: []
+                  type: query
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 5m
+        annotations:
+          summary: "Kafka consumer stalled on topic {{ $labels.topic }}"
+          description: "No messages processed from topic {{ $labels.topic }} in the last 10 minutes."
+        labels:
+          severity: warning
+        isPaused: false
+
+      - uid: alert-celery-task-failures
+        title: Celery Task Failure Rate High
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: PBFA97CFB590B2093
+            model:
+              editorMode: code
+              expr: |
+                sum(rate(riskcore_notifications_sent_total{status="failed"}[10m])) by (event_type)
+                /
+                (sum(rate(riskcore_notifications_sent_total{status="sent"}[10m])) by (event_type)
+                +
+                sum(rate(riskcore_notifications_sent_total{status="failed"}[10m])) by (event_type))
+                * 100
+              instant: true
+              range: false
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: __expr__
+            model:
+              expression: A
+              reducer: last
+              refId: B
+              type: reduce
+          - refId: C
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: __expr__
+            model:
+              expression: B
+              refId: C
+              type: threshold
+              conditions:
+                - evaluator:
+                    params: [10]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: []
+                  type: query
+        noDataState: NoData
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: "High Celery task failure rate for {{ $labels.event_type }}"
+          description: "{{ $labels.event_type }} notification failure rate is above 10% for the last 5 minutes."
+        labels:
+          severity: warning
+        isPaused: false
+
+      - uid: alert-outbox-pending-high
+        title: Outbox Pending Events High
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: PBFA97CFB590B2093
+            model:
+              editorMode: code
+              expr: 'outbox_pending_total'
+              instant: true
+              range: false
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: __expr__
+            model:
+              expression: A
+              reducer: last
+              refId: B
+              type: reduce
+          - refId: C
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: __expr__
+            model:
+              expression: B
+              refId: C
+              type: threshold
+              conditions:
+                - evaluator:
+                    params: [1000]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: []
+                  type: query
+        noDataState: NoData
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: "Outbox accumulating events — relay possibly down"
+          description: "Outbox pending count is above 1000 for 5+ minutes. The outbox relay may be down or Kafka is unreachable."
+        labels:
+          severity: warning
+        isPaused: false
+
+      - uid: alert-outbox-event-failed
+        title: Outbox Event Failed
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: PBFA97CFB590B2093
+            model:
+              editorMode: code
+              expr: 'increase(outbox_failed_total[10m])'
+              instant: true
+              range: false
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: __expr__
+            model:
+              expression: A
+              reducer: last
+              refId: B
+              type: reduce
+          - refId: C
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: __expr__
+            model:
+              expression: B
+              refId: C
+              type: threshold
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: []
+                  type: query
+        noDataState: NoData
+        execErrState: Error
+        for: 0m
+        annotations:
+          summary: "Outbox event marked FAILED"
+          description: "An outbox event failed after max retries on topic {{ $labels.topic }}. Investigate manually."
+        labels:
+          severity: critical
+        isPaused: false

@@ -4,10 +4,10 @@ Analiza el estado actual del proyecto y recomienda exactamente qué implementar 
 
 ## Qué hacer con este comando
 
-1. Leer `PHASES.md` para ver las fases y sus checklists
-2. Leer la estructura actual del repositorio (`Glob` en el root)
-3. Determinar en qué fase estamos y qué falta
-4. Recomendar el próximo ítem concreto con instrucciones de implementación
+1. Leer `CONTEXT.md` — Sección 3 (Estado actual) y Sección 4 (Plan detallado) son la fuente de verdad
+2. Si el plan en CONTEXT.md no tiene suficiente detalle, consultar `docs/PHASES.md` como referencia secundaria
+3. Leer la estructura actual del repositorio (`Glob` en el root) para verificar qué existe
+4. Determinar qué falta según el plan activo y recomendar el próximo ítem concreto
 
 ## Formato de respuesta
 

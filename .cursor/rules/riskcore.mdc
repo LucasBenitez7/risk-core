@@ -1,214 +1,26 @@
 ---
-description: RiskCore project context, stack, patterns and rules for all AI agents
+description: RiskCore project — entry point for Cursor agents
 alwaysApply: true
 ---
 
-# RiskCore — Project Rules
+# RiskCore — Rules for Cursor
 
-## What is this project
-Insurance microservices backend portfolio project (Mapfre/Allianz style). 4 Django microservices + Next.js 15 dashboard + Kafka event-driven architecture.
+> This rule is auto-loaded by Cursor on every session.
+> Project rules live elsewhere — this file is just the entry point.
 
-> 📍 **Read `CONTEXT.md` first** — it has the current project state, active phase, and next step.
+## Read first, in this order
 
-**Read full context**: See `CLAUDE.md` in project root for complete documentation.
-**Business domain**: See `docs/GUIA_PROYECTO.md`
-**Technical decisions**: See `docs/TECHNICAL_DECISIONS.md`
-**API schemas**: See `docs/API_DESIGN.md`
-**Dev phases**: See `docs/PHASES.md`
+1. **`CONTEXT.md`** — current state, active phase, plan with checkboxes, phase-specific rules. **ALWAYS read first.**
+2. **`AGENTS.md`** — permanent project rules, stack, patterns, ways of working, "NEVER do this", Git workflow, PR format.
 
----
+`AGENTS.md` is the source of truth for rules (follows the open [agents.md](https://agents.md) convention).
 
-## Tech Stack (exact versions — do not deviate)
+## Minimum rules you cannot skip (full detail in `AGENTS.md`)
 
-### Backend (per service pyproject.toml)
-- Python 3.13, uv (latest stable) — package manager, replaces pip/virtualenv
-- Django 5.2.x LTS, DRF 3.15.2
-- confluent-kafka 2.6.x (NOT kafka-python)
-- Celery 5.4.x + Redis 7.2.x (notification-service only)
-- PostgreSQL 16.x (one DB per service, never shared)
-- psycopg3 binary 3.3.x
-- structlog 25.x, django-prometheus 0.3.x
-- Django Channels 4.1.x + channels-redis 4.2.x
-- httpx (inter-service HTTP with explicit 5s timeout)
-- Ruff 0.15.x (linting + formatting — NOT flake8/black/isort)
-- mypy 1.20.x + django-stubs 6.0.x
-- pytest 9.x + pytest-django 4.12.x + factory-boy 3.3.x
+- **NEVER** `git commit` or `git push` without explicit user permission
+- Business logic in `services.py`, never in `views.py`
+- `confluent-kafka` never `kafka-python` · `uv` never `pip` · `Ruff` never `flake8`/`black` · `pnpm` never `npm`/`yarn`
+- Self-audit mandatory before the tests step (see §"Self-Audit" in AGENTS.md)
+- PR title and description always in **English**, formatted for copy-paste into GitHub (see §"Pull Requests" in AGENTS.md)
 
-### Frontend
-- Next.js 15.5.9 (App Router), React 19.1.4, TypeScript 5.9.x
-- pnpm 10.24.0 (NOT npm or yarn)
-- Tailwind CSS 4.x, Radix UI, Zustand 5.x, Zod 4.x
-- Vitest 4.x + Playwright 1.58.x
-
----
-
-## Architecture Rules
-
-### 4 microservices — ports
-- policy-service: 8001 (customers + policies)
-- claims-service: 8002 (claims lifecycle)
-- notification-service: 8003 (async emails via Celery)
-- audit-service: 8004 (immutable event log)
-
-### Communication
-- Async by default: Kafka topics `policy.*` and `claim.*`
-- Sync (only one case): HTTP claims-service → policy-service to verify policy is ACTIVE before creating a claim
-- Never share databases between services
-- Never add new inter-service HTTP calls — use Kafka
-
-### Internal service structure
-```
-apps/
-├── core/           # health, exceptions, pagination, middleware
-└── [domain]/
-    ├── models.py      # ORM only, zero business logic
-    ├── serializers.py # DRF request/response schemas
-    ├── views.py       # Thin ViewSets — HTTP only, call service
-    ├── services.py    # ALL business logic lives here
-    ├── events.py      # Kafka producers
-    ├── consumers.py   # Kafka consumers
-    ├── tasks.py       # Celery tasks (notification-service only)
-    ├── clients.py     # HTTP client to other services (claims only)
-    └── tests/
-```
-
----
-
-## Mandatory Code Patterns
-
-### Business logic in services.py — never in views.py
-```python
-# views.py CORRECT
-def cancel(self, request, pk):
-    policy = get_object_or_404(Policy, pk=pk)
-    result = PolicyService().cancel_policy(policy, reason=request.data.get("reason"))
-    return Response(PolicySerializer(result).data)
-```
-
-### Kafka event schema — always this format
-```python
-{
-    "event_id": str(uuid.uuid4()),
-    "event_type": "policy.created",
-    "occurred_at": timezone.now().isoformat(),
-    "service": "policy-service",
-    "data": { ... }
-}
-```
-
-### Structured logs — request_id is injected automatically by RequestIDMiddleware
-```python
-# request_id is already bound to context via structlog.contextvars.bind_contextvars()
-# Do NOT pass it explicitly in HTTP views — middleware handles it
-logger.info("policy_created", policy_id=str(policy.id), customer_id=str(policy.customer_id))
-
-# Exception: Celery tasks and Kafka consumers (no HTTP context) — bind manually
-logger.info("email_sent", notification_id=notification_id, request_id=task_request_id)
-```
-
-### Standard error format — all services
-```json
-{
-  "error": { "code": "POLICY_CANCELLED", "message": "Business language, never technical.", "details": {} },
-  "request_id": "uuid"
-}
-```
-
-### Settings split by environment
-```
-config/settings/base.py | development.py | production.py | test.py
-```
-Always use `python-decouple` for env vars. Never hardcode.
-
----
-
-## Business Rules
-
-### Claims state machine
-```
-FILED → UNDER_REVIEW → APPROVED  → RESOLVED
-                    └→ REJECTED  → RESOLVED
-```
-- Only the service changes status (never a direct PATCH on status field)
-- Every transition saves ClaimStatusHistory
-- Every transition emits Kafka event claim.status_changed
-
-### AuditEvent is append-only — absolute rule
-Never update or delete AuditEvent. Only INSERT. No UpdateAPIView, no DestroyAPIView. Regulatory requirement.
-
-### Policy verification before claim
-Claims service MUST call policy-service verify endpoint before creating any claim. Invalid/cancelled policy → 400, never creates the claim.
-
----
-
-## Testing Rules
-
-### Unit tests — what to mock
-- confluent_kafka.Producer → mock
-- httpx inter-service calls → mock
-- django.core.mail → mock
-
-### Integration tests — what NOT to mock
-- PostgreSQL → real DB with @pytest.mark.django_db
-- Redis → real Redis for Channels/Celery tests
-
-### Coverage targets: services.py 90%+, views.py 80%+, consumers.py 80%+
-
-### Write tests in the same phase as the feature, never at the end.
-
----
-
-## Git — Workflow and Absolute Rules
-
-### CRITICAL: Never commit or push without explicit user permission
-Always ask the user before any `git commit` or `git push`. Wait for confirmation. "Implement X" does not include permission to commit.
-
-Read-only git commands (always OK without asking): `git status`, `git diff`, `git log`, `git branch`
-
-### Branch workflow
-```
-main                ← production, protected — never commit directly
-dev                 ← integration — receives PRs from feat branches
-feat/phase-N-name   ← one branch per development phase
-```
-
-### Conventional commits — required
-```
-feat(policy): add cancellation endpoint
-fix(claims): validate policy status before filing
-chore(infra): add kafka topic creation script
-test(audit): add consumer integration tests
-docs(api): update claims endpoint schemas
-```
-
-Valid scopes: `policy`, `claims`, `notifications`, `audit`, `infra`, `frontend`, `gateway`, `api`
-
-### Commit grouping — one logical change per commit
-Never mix unrelated changes in one commit. Group by feature/layer:
-```
-feat(policy): add Customer model and migration
-feat(policy): add CustomerViewSet with CRUD endpoints
-test(policy): add unit tests for PolicyService
-```
-
----
-
-## NEVER Do This
-
-| Forbidden | Reason |
-|---|---|
-| git commit/push without permission | User must explicitly approve |
-| Direct commit to main or dev | Always work in feat branches |
-| Mix unrelated changes in one commit | One commit = one logical change |
-| Share DB between services | Violates Database per Service |
-| Business logic in views.py | Must be in services.py |
-| Use kafka-python | Use confluent-kafka (librdkafka) |
-| Hardcode secrets or URLs | Use python-decouple + .env |
-| Modify/delete AuditEvent | Regulatory requirement, append-only |
-| New inter-service HTTP | Use Kafka instead |
-| Send emails in Kafka consumer | Delegate to Celery task |
-| Rate limiting in Django | Goes in Nginx gateway |
-| Use pip install or requirements.txt | Use uv + pyproject.toml |
-| Use flake8 or black | Use Ruff for everything |
-| Use npm or yarn | Use pnpm in frontend |
-| JOIN across service databases | Communicate via Kafka or HTTP |
+## For everything else → `AGENTS.md`

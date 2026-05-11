@@ -1,0 +1,381 @@
+name: riskcore
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - riskcore
+
+  redis:
+    image: redis:7.2
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - riskcore
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
+    ports:
+      - "9092:9092"
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics --bootstrap-server localhost:9092 --list"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+    networks:
+      - riskcore
+
+  # ─── Gateway ─────────────────────────────────────
+  gateway:
+    build:
+      context: ../gateway
+      dockerfile: Dockerfile
+    ports:
+      - "8080:80"
+    depends_on:
+      - policy-web
+      - claims-web
+      - notification-web
+      - audit-web
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - riskcore
+
+  # ─── Gateway Load Test (rate limit 10000r/m) ─────
+  gateway-loadtest:
+    build:
+      context: ../gateway
+    ports:
+      - "8081:80"
+    volumes:
+      - ../gateway/nginx.loadtest.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - policy-web
+      - claims-web
+      - notification-web
+      - audit-web
+    profiles:
+      - loadtest
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - riskcore
+
+  # ─── policy-service ──────────────────────────────
+  policy-web:
+    build:
+      context: ../policy-service
+      dockerfile: Dockerfile
+    command: sh -c "python manage.py migrate && python manage.py seed_test_user && gunicorn config.wsgi:application -w 4 -k gthread --bind 0.0.0.0:8001"
+    environment:
+      - SECRET_KEY=dev-secret-key
+      - DEBUG=True
+      - ALLOWED_HOSTS=localhost,127.0.0.1,policy-web,gateway,gateway-loadtest
+      - DB_NAME=riskcore_policies
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+    ports:
+      - "8001:8001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - riskcore
+
+  # ─── claims-service ──────────────────────────────
+  claims-web:
+    build:
+      context: ../claims-service
+      dockerfile: Dockerfile
+    environment:
+      - SECRET_KEY=dev-secret-key
+      - DEBUG=True
+      - ALLOWED_HOSTS=localhost,127.0.0.1,claims-web,gateway,gateway-loadtest
+      - DB_NAME=riskcore_claims
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - POLICY_SERVICE_URL=http://policy-web:8001
+      - POLICY_SERVICE_TIMEOUT=5
+    command: gunicorn config.wsgi:application -w 4 -k gthread --bind 0.0.0.0:8002
+    ports:
+      - "8002:8002"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - riskcore
+
+  # ─── notification-service ────────────────────────
+  notification-web:
+    build:
+      context: ../notification-service
+      dockerfile: Dockerfile
+    environment:
+      - SECRET_KEY=dev-secret-key
+      - DEBUG=True
+      - ALLOWED_HOSTS=localhost,127.0.0.1,notification-web,gateway,gateway-loadtest
+      - DB_NAME=riskcore_notifications
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - REDIS_URL=redis://redis:6379/0
+      - EMAIL_HOST=smtp.gmail.com
+      - EMAIL_PORT=587
+      - EMAIL_HOST_USER=
+      - EMAIL_HOST_PASSWORD=
+      - DEFAULT_FROM_EMAIL=noreply@riskcore.com
+    command: gunicorn config.wsgi:application -w 4 -k gthread --bind 0.0.0.0:8003
+    ports:
+      - "8003:8003"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - riskcore
+
+  # ─── audit-service ───────────────────────────────
+  audit-web:
+    build:
+      context: ../audit-service
+      dockerfile: Dockerfile
+    environment:
+      - SECRET_KEY=dev-secret-key
+      - DEBUG=True
+      - ALLOWED_HOSTS=localhost,127.0.0.1,audit-web,gateway,gateway-loadtest
+      - DB_NAME=riskcore_audit
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - REDIS_URL=redis://redis:6379/1
+    ports:
+      - "8004:8004"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - riskcore
+
+  # ─── Outbox Relays ────────────────────────────────
+  policy-outbox-relay:
+    build:
+      context: ../policy-service
+    command: ["python", "manage.py", "run_outbox_relay"]
+    environment:
+      - SECRET_KEY=dev-secret-key
+      - DEBUG=True
+      - DB_NAME=riskcore_policies
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - DJANGO_SETTINGS_MODULE=config.settings.development
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - riskcore
+    restart: unless-stopped
+
+  claims-outbox-relay:
+    build:
+      context: ../claims-service
+    command: ["python", "manage.py", "run_outbox_relay"]
+    environment:
+      - SECRET_KEY=dev-secret-key
+      - DEBUG=True
+      - DB_NAME=riskcore_claims
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - POLICY_SERVICE_URL=http://policy-web:8001
+      - POLICY_SERVICE_TIMEOUT=5
+      - DJANGO_SETTINGS_MODULE=config.settings.development
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - riskcore
+    restart: unless-stopped
+
+  # ─── Loki ────────────────────────────────────────
+  loki:
+    image: grafana/loki:2.9.14
+    restart: unless-stopped
+    command: -config.file=/etc/loki/loki-config.yml
+    volumes:
+      - ./loki/loki-config.yml:/etc/loki/loki-config.yml
+      - loki_data:/loki
+    ports:
+      - "3100:3100"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3100/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - riskcore
+
+  # ─── Promtail ────────────────────────────────────
+  promtail:
+    image: grafana/promtail:2.9.14
+    restart: unless-stopped
+    command: -config.file=/etc/promtail/promtail-config.yml
+    volumes:
+      - ./promtail/promtail-config.yml:/etc/promtail/promtail-config.yml
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+    depends_on:
+      loki:
+        condition: service_healthy
+    networks:
+      - riskcore
+
+  # ─── Prometheus ──────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/-/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - riskcore
+
+  # ─── Grafana ─────────────────────────────────────
+  grafana:
+    image: grafana/grafana:11.6.0
+    restart: unless-stopped
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboards:/etc/grafana/dashboards
+    ports:
+      - "3000:3000"
+    depends_on:
+      loki:
+        condition: service_healthy
+      prometheus:
+        condition: service_healthy
+    networks:
+      - riskcore
+
+# ─── Load Testing ───────────────────────────────────
+  locust:
+    image: locustio/locust:2.43.0
+    volumes:
+      - ../infra/load-testing:/mnt/locust
+    working_dir: /mnt/locust
+    command: ["-f", "/mnt/locust/locustfile.py", "--host=http://gateway"]
+    ports:
+      - "8089:8089"
+    depends_on:
+      - gateway-loadtest
+    profiles:
+      - loadtest
+    networks:
+      - riskcore
+
+networks:
+  riskcore:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  loki_data:
+  prometheus_data:

@@ -1,0 +1,58 @@
+[project]
+name = "notification-service"
+version = "0.1.0"
+description = "Async email notification microservice"
+requires-python = ">=3.13"
+dependencies = [
+    "django>=5.2,<5.3",
+    "djangorestframework>=3.15,<3.16",
+    "djangorestframework-simplejwt>=5.5,<5.6",
+    "drf-spectacular>=0.29,<0.30",
+    "confluent-kafka>=2.6,<2.7",
+    "psycopg[binary]>=3.3,<3.4",
+    "structlog>=25.0,<26.0",
+    "django-prometheus>=2.3,<2.5",
+    "django-cors-headers>=4.9,<4.10",
+    "django-health-check>=4.2,<4.3",
+    "python-decouple>=3.8,<3.9",
+    "django-unfold>=0.89,<0.90",
+    "celery>=5.4,<5.5",
+    "redis>=5.2,<5.3",
+    "gunicorn>=26.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.15,<0.16",
+    "mypy>=1.20,<1.21",
+    "django-stubs>=6.0,<6.1",
+    "pytest>=9.0,<10.0",
+    "pytest-django>=4.12,<4.13",
+    "factory-boy>=3.3,<3.4",
+    "faker>=40.0,<41.0",
+    "bandit>=1.9,<1.10",
+]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "C4", "UP", "SIM"]
+ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["apps", "config"]
+
+[tool.ruff.lint.per-file-ignores]
+"config/settings/*.py" = ["F403", "F405"]
+"apps/*/urls.py" = ["F401"]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings.test"
+python_files = ["test_*.py"]
+
+[dependency-groups]
+dev = [
+    "pytest-cov>=7.1.0",
+]

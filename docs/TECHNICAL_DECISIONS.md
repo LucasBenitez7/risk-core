@@ -1,6 +1,6 @@
 # TECHNICAL DECISIONS — RiskCore
 
-> Decisiones técnicas con justificación. Referencia para implementación y para explicar en entrevista.
+> Decisiones técnicas con justificación. Referencia para implementación.
 
 ---
 
@@ -11,9 +11,6 @@
 **Razón**: cada servicio tiene su propia DB, su propio ciclo de deploy, y se comunica exclusivamente via Kafka o HTTP. Implementa correctamente el patrón **Database per Service** — el anti-patrón más común en microservicios mal hechos es compartir DB entre servicios.
 
 **Alternativa descartada**: monolito modular. Descartado porque el objetivo del proyecto es demostrar microservicios con event-driven architecture como portfolio.
-
-**Cómo explicarlo en entrevista**:
-> "Cada servicio tiene su propia base de datos — policy-service no puede hacer JOIN con la tabla de claims. Toda comunicación es via eventos Kafka o HTTP síncrono cuando la consistencia inmediata es necesaria."
 
 ---
 
@@ -29,7 +26,7 @@
 - Más activo en mantenimiento y soporte
 - kafka-python tiene issues conocidos con reconexión en producción
 
-**Alternativa descartada**: RabbitMQ. Descartado porque Kafka permite replay de mensajes históricos (fundamental para el audit log), tiene mejor throughput para miles de eventos/segundo, y es lo que usan empresas enterprise tipo Mapfre en sus core systems.
+**Alternativa descartada**: RabbitMQ. Descartado porque Kafka permite replay de mensajes históricos (fundamental para el audit log), tiene mejor throughput para miles de eventos/segundo, y es el estándar enterprise para sistemas event-driven.
 
 **Patrón de Consumer Groups**:
 ```
@@ -38,9 +35,6 @@ topic: policy.created
   consumer-group: notification-consumers → notification-service (offset propio)
 ```
 Cada consumer group mantiene su propio offset en el topic — si notification-service va más lento, no bloquea a audit-service.
-
-**Cómo explicarlo en entrevista**:
-> "Usamos consumer groups para que cada servicio consuma los eventos a su propio ritmo. Si notification-service tiene un pico de carga, sus mensajes no se pierden — siguen en Kafka esperando. El offset de cada consumer group es independiente."
 
 ---
 
@@ -312,9 +306,6 @@ VALID_TRANSITIONS = {
 
 **Por qué no Vite + React SPA**: el dashboard necesita SSR para carga inicial rápida y SEO básico en la página de login. Next.js da eso sin configuración extra.
 
-**Cómo explicarlo en entrevista**:
-> "Usamos App Router porque es el futuro de Next.js. Server Components nos permiten hacer fetch de datos iniciales sin exponer la API key al cliente, y los layouts anidados simplifican la estructura del dashboard sin prop drilling."
-
 ---
 
 ## 16. Estado Global Frontend — Zustand
@@ -326,9 +317,6 @@ VALID_TRANSITIONS = {
 **Alternativa descartada — Redux Toolkit**: demasiado boilerplate para el tamaño del estado que necesitamos. Redux tiene sentido cuando hay múltiples equipos tocando el mismo estado o cuando el estado es muy complejo. Para un dashboard con 3-4 stores pequeñas, Zustand es la elección correcta.
 
 **Alternativa descartada — Jotai/Recoil**: atom-based state es ideal para estado derivado complejo. El dashboard no tiene ese nivel de complejidad reactiva.
-
-**Cómo explicarlo en entrevista**:
-> "Zustand porque el estado del dashboard es simple: websocket events, filtros activos, UI state. No necesitamos Redux para eso — la regla es usar la herramienta más simple que resuelva el problema."
 
 ---
 
@@ -348,9 +336,6 @@ VALID_TRANSITIONS = {
 **Por qué JWT en query param y no en header**: los WebSockets estándar del browser no permiten headers custom en el handshake. La alternativa es enviar el token como primer mensaje tras conectar, pero complica el consumer. Query param es el patrón estándar para WS auth.
 
 **Channel groups**: todos los clientes conectados están en el grupo `"events"`. Cualquier evento Kafka llega a todos. Si en el futuro se necesita filtrado por usuario, se crean grupos individuales.
-
-**Cómo explicarlo en entrevista**:
-> "Django Channels nos da WebSockets sobre ASGI con muy poco código. El JWT va en el query param porque el browser no permite headers en el WS handshake. El canal Redis conecta el consumer Kafka con el consumer WebSocket — cuando llega un evento Kafka, el consumer lo publica en Redis y Channels lo pushea a todos los clientes conectados."
 
 ---
 
@@ -388,7 +373,7 @@ type CreatePolicyForm = z.infer<typeof createPolicySchema>; // tipo automático
 
 **Decisión**: Conventional Commits enforced via commitlint en pre-commit. `.releaserc.json` configurado para semantic-release.
 
-**Razón**: conventional commits permiten generar changelogs automáticos y versionar con semantic-release. Para un portfolio, tener un CHANGELOG.md bien formado es un diferencial. Los recruiters técnicos revisan el historial de commits.
+**Razón**: conventional commits permiten generar changelogs automáticos y versionar con semantic-release.
 
 **Reglas críticas del workflow**:
 - Nunca commit directo a `main` o `dev`
@@ -397,9 +382,6 @@ type CreatePolicyForm = z.infer<typeof createPolicySchema>; // tipo automático
 - Un PR por fase de desarrollo
 
 **Scopes válidos**: `policy`, `claims`, `notifications`, `audit`, `infra`, `frontend`, `gateway`, `api`
-
-**Cómo explicarlo en entrevista**:
-> "Conventional commits nos dan trazabilidad y la posibilidad de automatizar releases. El CI verifica el formato del mensaje antes de aceptar el PR — si el mensaje no cumple el formato, el pipeline falla."
 
 ---
 
@@ -424,6 +406,142 @@ known-first-party = ["apps", "config"]
 ```
 
 **Alternativa descartada**: black + flake8 + isort. Tres herramientas separadas con configuraciones separadas que a veces conflictúan entre sí.
+
+---
+
+## 22. Límites de Recursos y Control de Costos — Free Tier
+
+> Aplica a producción en Railway + Upstash Kafka + Upstash Redis. En local, sin limitaciones.
+
+El objetivo es que el sistema funcione en producción con coste cercano a cero durante la fase de portfolio. Cada servicio y componente tiene límites explícitos configurados para mantenerse en el free tier.
+
+### Kafka — Upstash Free Tier
+
+**Límites del plan gratuito**: 10.000 mensajes/día, 100 MB de almacenamiento total.
+
+**Configuración de topics para minimizar almacenamiento**:
+```bash
+# Retención: 1 día en producción (en local: 7 días para desarrollo)
+kafka-topics.sh --create --topic policy.created \
+  --config retention.ms=86400000 \   # 1 día
+  --config retention.bytes=10485760 \ # 10 MB máximo por topic
+  --partitions 1 \                    # 1 partición (free tier, no necesitamos más)
+  --replication-factor 1
+```
+
+**Regla de producción**: 1 partición por topic, retención de 1 día, sin compresión (overhead mayor que el ahorro para este volumen). En local Docker: 3 particiones, 7 días de retención.
+
+**Si el límite de 10K msg/día se supera**: Upstash bloquea el producer. Los servicios deben manejar `KafkaException` en el producer sin interrumpir el flujo principal — el evento se pierde pero la operación de DB ya se completó.
+
+```python
+# en events.py — producción nunca debe fallar por Kafka
+try:
+    self._producer.flush(timeout=3)
+except Exception:
+    logger.warning("kafka_produce_failed", event_type=event_type, policy_id=...)
+    # No re-raise — la operación DB ya commitió
+```
+
+### Redis — Upstash Redis Free Tier
+
+**Límites del plan gratuito**: 10.000 comandos/día, 256 MB de almacenamiento.
+
+**Usos de Redis en este proyecto**:
+| Uso | Servicio | Comandos/día estimados |
+|---|---|---|
+| Celery broker (colas de tareas) | notification-service | ~500 (bajo volumen) |
+| Celery result backend | notification-service | ~500 |
+| Django Channels layer | audit-service | ~200 (WebSocket) |
+
+**Configuración Celery para minimizar comandos Redis**:
+```python
+# config/celery.py — notification-service
+app.conf.update(
+    broker_url=config("REDIS_URL"),
+    result_backend=config("REDIS_URL"),
+    result_expires=3600,          # resultados expiran en 1 hora (libera memoria)
+    task_serializer="json",
+    result_serializer="json",
+    worker_concurrency=1,         # 1 worker en producción (Railway free tier = 512MB RAM)
+    worker_prefetch_multiplier=1, # no prefetch agresivo — procesar de a 1
+    task_acks_late=True,          # ACK tras completar, no al recibir
+)
+```
+
+**Regla**: `worker_concurrency=1` en producción. Railway Starter plan tiene 512MB RAM — múltiples workers Celery agotan la memoria. 1 worker es suficiente para el volumen de portfolio.
+
+### PostgreSQL — Connection Pooling
+
+**Problema**: cada proceso Django abre conexiones a PostgreSQL. Con `worker_concurrency=1` en Celery y Gunicorn con 2 workers, cada servicio abre ~4-6 conexiones. Railway PostgreSQL Starter tiene límite de 25 conexiones simultáneas en total.
+
+**Configuración `CONN_MAX_AGE` para reusar conexiones**:
+```python
+# config/settings/production.py
+DATABASES = {
+    "default": {
+        ...
+        "CONN_MAX_AGE": 60,   # reusar conexión hasta 60s antes de cerrar
+        "OPTIONS": {
+            "connect_timeout": 10,
+        },
+    }
+}
+```
+
+**Distribución de conexiones por servicio** (máximo 25 totales Railway):
+| Servicio | Workers Gunicorn | CONN_MAX_AGE | Conexiones máx |
+|---|---|---|---|
+| policy-service | 2 | 60s | 4 |
+| claims-service | 2 | 60s | 4 |
+| notification-service | 2 web + 1 Celery | 60s | 6 |
+| audit-service | 2 | 60s | 4 |
+| **Total** | | | **18** (margen de 7) |
+
+### Gunicorn — Workers en Producción
+
+**Regla**: `2 workers` por servicio en Railway Starter (512MB RAM por servicio).
+
+```dockerfile
+# En cada Dockerfile
+CMD ["gunicorn", "config.wsgi:application",
+     "--bind", "0.0.0.0:8000",
+     "--workers", "2",
+     "--timeout", "30",
+     "--keep-alive", "5"]
+```
+
+La fórmula estándar `(2 × CPU) + 1` daría más workers, pero en Railway free tier con 0.5 vCPU compartida, 2 workers es el balance correcto entre concurrencia y memoria.
+
+### Celery — Límites de Reintentos
+
+**Problema**: reintentos infinitos o muy frecuentes queman Redis y Railway compute.
+
+```python
+# notification-service/apps/notifications/tasks.py
+@shared_task(
+    bind=True,
+    max_retries=3,            # máximo 3 reintentos (no infinitos)
+    default_retry_delay=300,  # 5 minutos entre reintentos (no 60s — menos Redis commands)
+    soft_time_limit=25,       # la task debe completar en 25s
+    time_limit=30,            # hard kill a los 30s
+)
+def send_email_notification(self, notification_id: str) -> None:
+    ...
+```
+
+**Por qué 5 minutos entre reintentos**: con 60s de delay y 3 reintentos, si SMTP falla, quemas 3 slots de tus 10K comandos Redis en 3 minutos. Con 5 minutos, das tiempo a que SMTP se recupere y espacias el uso de Redis.
+
+### Rate Limiting — Protección de Costos
+
+El rate limiting del gateway (Sección 9) también actúa como protección de costos: un cliente abusivo que hace 10.000 requests/hora podría agotar el free tier de Kafka (10K msg/día) en una hora. Con el límite de 200 req/min por JWT, el máximo teórico es 288.000 requests/día, pero solo ~10% generan eventos Kafka → ~28.000 eventos. Esto supera el free tier.
+
+**Mitigación**: en producción, el límite con JWT debe reducirse a **60 req/min** (en vez de 200 req/min) para mantenerse dentro del free tier de Upstash:
+```nginx
+# gateway/nginx.conf — producción
+limit_req_zone $http_authorization zone=api_auth:10m rate=60r/m;
+```
+
+En desarrollo local, mantener 200 req/min para no limitar las pruebas.
 
 ---
 
@@ -461,12 +579,78 @@ RUN uv sync --frozen --no-dev
 
 **Package manager frontend**: pnpm 10.24.0 (no relacionado con uv — son ecosistemas separados).
 
-**Cómo explicarlo en entrevista**:
-> "Usamos uv del mismo equipo que Ruff — ambos escritos en Rust para máximo rendimiento. En CI, instalar las dependencias de un servicio tarda menos de 5 segundos con uv frente a 30-60 con pip. El uv.lock garantiza que desarrollo, CI y Railway tienen exactamente las mismas versiones."
+---
+
+## 23. Outbox Pattern — At-Least-Once Delivery DB↔Kafka
+
+**Decisión**: Patrón Outbox transaccional en `policy-service` y `claims-service` para eliminar el dual-write entre PostgreSQL y Kafka.
+
+**Problema que resuelve**: en el modelo previo (Fase 6), `services.py` hacía `Policy.objects.create()` y luego `producer.produce_policy_created()` fuera de la transacción. Si el proceso moría entre el commit de DB y el publish de Kafka, el evento se perdía para siempre — pero la API ya había respondido 201 al cliente. Inconsistencia silenciosa.
+
+**Implementación**:
+- App Django `apps/outbox/` en cada servicio con un único modelo `OutboxEvent` (status PENDING/PUBLISHED/FAILED)
+- Productor (`emit_policy_event`, `emit_claim_event`): inserta `OutboxEvent` **dentro** del mismo `transaction.atomic()` que crea/actualiza el aggregate
+- Relay separado (`run_outbox_relay` management command, container Docker propio): `select_for_update(skip_locked=True)` + `producer.flush()` dentro de la transacción del relay → garantiza que el evento llegó al broker antes de marcar `published_at` en DB
+- Índice parcial PostgreSQL `WHERE status='PENDING'` → escala a millones de eventos publicados sin degradar el escaneo de pendientes
+
+**Garantía**: at-least-once. Los consumers (`audit-service`, `notification-service`) ya manejan duplicados via `IntegrityError` por `event_id`, así que no requieren cambios.
+
+**Trade-offs aceptados**:
+- +1 INSERT por mutación (latencia +5-15ms en p95 — verificado en `load-testing-results.md` §Phase 6.5 retest, no introdujo regresión medible)
+- +2 containers (`policy-outbox-relay`, `claims-outbox-relay`)
+- Eventual consistency entre DB y Kafka (típicamente <500ms con `POLL_INTERVAL=0.5s`)
+
+**Alternativa descartada — Debezium / CDC**: lee el WAL de PostgreSQL y publica cambios a Kafka. Más robusto en producción pero overkill para este monorepo dockerizado: requiere un Connect cluster, configuración de replicación, y rompe el modelo Database-per-Service (Debezium necesita acceso al WAL del cluster, no solo a una DB lógica). El relay-as-management-command da el 90% del beneficio con 1/10 del operational burden.
+
+**Alternativa descartada — `transaction.on_commit(producer.produce)`**: parece equivalente pero no lo es. Si el proceso muere después del commit pero antes del callback `on_commit`, el evento se pierde. El outbox sobrevive a crashes de proceso porque el evento está en DB.
+
+**Verificación de fault tolerance** (test manual en `docs/PHASE_6_5_HARDENING.md` §3.9):
+```bash
+docker compose stop kafka
+curl -X POST .../api/policies/policies/  # → 201 OK inmediato
+# OutboxEvent queda PENDING
+docker compose start kafka                # → relay publica en <1s
+```
 
 ---
 
-## 23. Deploy — Railway
+## 24. Circuit Breaker — claims → policy
+
+**Decisión**: `pybreaker` envuelve la llamada HTTP `claims-service → policy-service /verify/`. Tras 5 fallos consecutivos de infra (5xx, timeouts), el circuito abre durante 30s y todas las llamadas fallan inmediatamente.
+
+**Problema que resuelve**: sin breaker, una degradación prolongada de `policy-service` (caída total, latencia alta sostenida) hace que cada Gunicorn worker de `claims-service` espere 5 segundos por request a `verify`. Con 50 usuarios concurrentes file-claim, los 4 workers se saturan en segundos esperando timeouts. El sistema entero se cuelga aunque solo policy-service esté degradado.
+
+**Configuración**:
+```python
+_policy_breaker = pybreaker.CircuitBreaker(
+    fail_max=5,                      # 5 fallos consecutivos → open
+    reset_timeout=30,                # tras 30s → half-open (prueba 1 request)
+    exclude=[_ClientBusinessError],  # 4xx no cuentan como fallo
+    listeners=[_BreakerMetrics()],
+)
+```
+
+**Sutileza crítica — 4xx vs 5xx**: HTTP 404 ("póliza no existe") es error de cliente, no fallo de infra. Si pybreaker contara 404s, 5 usuarios con UUIDs inválidos abrirían el circuito para todos. La solución es separar la llamada HTTP cruda (`_http_verify` decorado por el breaker) del manejo de errores de negocio (`verify_policy`): los 4xx se convierten a `_ClientBusinessError`, que está en `exclude=[]` → no incrementan el contador.
+
+**Métricas Prometheus**:
+- `circuit_breaker_state{target="policy-service"}` — Gauge 0=closed, 1=open, 2=half-open
+- `circuit_breaker_state_changes_total{target,from_state,to_state}` — Counter de transiciones
+
+**Alerta Grafana**: `PolicyCircuitBreakerOpen` — `circuit_breaker_state >= 1` durante 2m → severity warning.
+
+**Por qué pybreaker y no alternativas**:
+- **`pybreaker`** ✅ — implementación canónica de Python, síncrona (compatible con `httpx.Client` síncrono que ya usamos), API de listeners limpia para emitir métricas
+- ❌ **`circuitbreaker`** (decorador) — no soporta listeners, métricas requieren monkey-patching
+- ❌ **`tenacity`** — es retry, no breaker. Útil con backoff exponencial, pero no protege contra cascada de timeouts si el upstream sigue caído
+- ❌ **Hystrix-py** — abandonado desde 2018, basado en Hystrix de Netflix que el propio Netflix puso en mantenimiento mode
+
+**Por qué thresholds 5/30s**: 5 fallos da margen para degradaciones transitorias (1 request lenta no abre). 30s es suficiente para que un policy-service en restart termine de levantarse. Ambos son configurables — el plan abre la puerta a tunearlos por servicio si se observan falsos positivos.
+
+**No usado para `consumer → DB` o `consumer → Kafka`**: esos paths ya son retried por Kafka (auto-retry en consumer) o por confluent-kafka (auto-retry interno). El breaker solo agrega valor donde no hay retry automático — la llamada HTTP síncrona inter-service.
+
+---
+
+## 25. Deploy — Railway
 
 **Decisión**: Railway para producción. Un proyecto Railway por microservicio.
 
@@ -476,5 +660,4 @@ RUN uv sync --frozen --no-dev
 
 **Alternativa descartada**: Heroku. Eliminó el free tier y es más caro que Railway para el mismo resultado. Render es similar a Railway pero tiene menos opciones de networking entre servicios.
 
-**Cómo explicarlo en entrevista**:
-> "Railway nos da deploys automáticos desde GitHub, base de datos managed, y networking privado entre servicios sin DevOps overhead. Para un proyecto de portfolio, lo que importa es que el sistema funcione en producción — Railway nos permite demostrarlo sin invertir semanas en infraestructura."
+---
