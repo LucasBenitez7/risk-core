@@ -1,5 +1,9 @@
+from datetime import timedelta
+
 import structlog
 from django.db import transaction
+from django.db.models import Count
+from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
 from apps.claims.clients import PolicyServiceClient
@@ -135,3 +139,32 @@ class ClaimService:
             queryset = queryset.filter(incident_type=incident_type)
 
         return queryset
+
+    def get_metrics(self) -> dict:
+        today = timezone.now().date()
+        thirty_days_ago = today - timedelta(days=30)
+
+        by_status_qs = Claim.objects.values("status").annotate(count=Count("id"))
+        claims_by_status = dict.fromkeys(Claim.Status.values, 0)
+        for row in by_status_qs:
+            claims_by_status[row["status"]] = row["count"]
+
+        resolved_history = ClaimStatusHistory.objects.filter(
+            to_status=Claim.Status.RESOLVED,
+            changed_at__date__gte=thirty_days_ago,
+        ).select_related("claim")
+
+        days_list = [
+            (h.changed_at.date() - h.claim.filed_at.date()).days
+            for h in resolved_history
+        ]
+        avg_resolution_days = (
+            round(sum(days_list) / len(days_list), 1) if days_list else 0.0
+        )
+
+        return {
+            "open_claims": Claim.objects.exclude(status=Claim.Status.RESOLVED).count(),
+            "claims_today": Claim.objects.filter(filed_at__date=today).count(),
+            "claims_by_status": claims_by_status,
+            "avg_resolution_days": avg_resolution_days,
+        }

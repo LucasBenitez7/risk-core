@@ -1,18 +1,29 @@
 from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.mixins import CreateModelMixin, ListModelMixin, RetrieveModelMixin
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.views import APIView
 from rest_framework.viewsets import GenericViewSet
 
 from apps.claims.models import Claim
 from apps.claims.serializers import (
     ClaimListSerializer,
     ClaimSerializer,
+    ClaimsMetricsSerializer,
     ClaimTransitionSerializer,
 )
 from apps.claims.services import ClaimService
 from apps.core.exceptions import ClaimNotFoundError
 from apps.core.pagination import StandardPagination
+
+
+class ClaimsMetricsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        data = ClaimService().get_metrics()
+        return Response(ClaimsMetricsSerializer(data).data)
 
 
 class ClaimViewSet(
