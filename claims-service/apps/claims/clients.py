@@ -72,7 +72,12 @@ class PolicyServiceClient:
                     policy_id=policy_id, policy_status="NOT_FOUND"
                 ) from None
             raise PolicyServiceUnavailableError(policy_id=policy_id) from None
-        except (httpx.TimeoutException, httpx.ConnectError, httpx.RequestError):
+        except (
+            httpx.TimeoutException,
+            httpx.ConnectError,
+            httpx.RequestError,
+            httpx.HTTPStatusError,
+        ):
             raise PolicyServiceUnavailableError(policy_id=policy_id) from None
 
         if not data.get("is_valid"):
