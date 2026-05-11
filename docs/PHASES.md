@@ -2,6 +2,8 @@
 
 > Fases de desarrollo ordenadas. Cada fase tiene rama Git propia, objetivo claro y checklist de entregables.
 > Stack: Python + Django + Kafka + Redis + PostgreSQL + Next.js + Grafana/Loki.
+>
+> **Nota (2026-05): Playwright E2E removido del scope de Fase 7.** Las menciones a Playwright en este archivo (CI workflow de ejemplo, setup de tests, etc.) reflejan el plan original y NO se ejecutan. El plan activo vive en `CONTEXT.md §3`. Tests del frontend = solo Vitest (unit + component).
 
 ---
 
@@ -23,7 +25,7 @@
 
 **Total estimado**: ~9 días trabajando en paralelo con la búsqueda de empleo.
 
-**Nota sobre Fase 6.5**: añadida tras Fase 6 al detectarse en load testing un bottleneck real (`select_for_update()` en `generate_policy_number()`) y dos gaps de resiliencia frecuentes en arquitecturas event-driven (dual-write entre DB y Kafka, ausencia de circuit breaker en HTTP inter-service). El plan completo vive en `docs/PHASE_6_5_HARDENING.md`.
+**Nota sobre Fase 6.5**: añadida tras Fase 6 al detectarse en load testing un bottleneck real (`select_for_update()` en `generate_policy_number()`) y dos gaps de resiliencia frecuentes en arquitecturas event-driven (dual-write entre DB y Kafka, ausencia de circuit breaker en HTTP inter-service). Cerrada y mergeada a main (commit `e1832ee`). El plan detallado se archivó en `CONTEXT.md §3` (`<details>` plegable).
 
 ---
 
@@ -806,7 +808,7 @@ open http://localhost:3000   # Grafana con todos los dashboards cargados
 
 **Objetivo**: aplicar dos patrones de resiliencia clásicos en arquitecturas event-driven que diferencian un sistema "demo" de un sistema "production-grade": Outbox Pattern (elimina dual-write entre DB y Kafka) y Circuit Breaker (en la llamada HTTP claims→policy).
 
-**Plan detallado**: `docs/PHASE_6_5_HARDENING.md` — incluye 3 bloques (Circuit Breaker → Outbox → Verificación), código de referencia, tests obligatorios, métricas Prometheus nuevas y self-audit por bloque.
+**Plan detallado**: archivado en `CONTEXT.md §3` (`<details>` plegable) — incluye 3 bloques (Circuit Breaker → Outbox → Verificación) con código de referencia, tests obligatorios, métricas Prometheus y self-audit por bloque.
 
 ### Entregables
 

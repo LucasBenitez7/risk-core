@@ -1,4 +1,4 @@
-.PHONY: dev infra test lint kafka-setup logs logs-loki shell gateway-test load-test load-test-ui help
+.PHONY: dev infra test lint kafka-setup logs logs-loki shell gateway-test load-test load-test-ui frontend-dev frontend-test frontend-lint help
 
 # ─── Default ─────────────────────────────────────────
 help:
@@ -103,6 +103,16 @@ load-test-ui:
 gateway-test:
 	cd gateway && bash test.sh
 
+# ─── Frontend ──────────────────────────────────────
+frontend-dev:
+	cd frontend && pnpm dev
+
+frontend-test:
+	cd frontend && pnpm test
+
+frontend-lint:
+	cd frontend && pnpm lint && pnpm format:check
+
 # ─── Help ───────────────────────────────────────────
 help:
 	@echo "RiskCore — Development Commands"
@@ -120,3 +130,7 @@ help:
 	@echo "  make gateway-test     Run gateway integration test suite"
 	@echo "  make load-test SCENARIO=N  Run locust scenario N in headless mode"
 	@echo "  make load-test-ui      Run locust web UI on port 8089"
+	@echo ""
+	@echo "  make frontend-dev      Start Next.js dev server (port 3001)"
+	@echo "  make frontend-test     Run frontend unit tests (Vitest)"
+	@echo "  make frontend-lint      Lint + format check frontend"

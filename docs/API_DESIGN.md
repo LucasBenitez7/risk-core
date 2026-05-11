@@ -69,9 +69,9 @@ Crear nuevo cliente.
   "email": "maria.garcia@email.com",
   "dni": "12345678A",
   "phone": "+34 612 345 678",
-  "birth_date": "1985-03-15",
   "address": "Calle Mayor 123, Madrid",
-  "created_at": "2025-01-15T10:00:00Z"
+  "created_at": "2025-01-15T10:00:00Z",
+  "updated_at": "2025-01-15T10:00:00Z"
 }
 ```
 
@@ -102,8 +102,10 @@ Listar clientes con paginación y filtros.
       "full_name": "María García López",
       "email": "maria.garcia@email.com",
       "dni": "12345678A",
+      "phone": "+34 612 345 678",
+      "address": "Calle Mayor 123, Madrid",
       "created_at": "2025-01-15T10:00:00Z",
-      "active_policies_count": 2
+      "updated_at": "2025-01-15T10:00:00Z"
     }
   ]
 }
@@ -112,29 +114,9 @@ Listar clientes con paginación y filtros.
 ---
 
 ### GET /api/policies/customers/{id}/
-Detalle de cliente.
+Detalle de cliente. Misma estructura que el ítem de lista.
 
-**Response 200**
-```json
-{
-  "id": "550e8400-...",
-  "full_name": "María García López",
-  "email": "maria.garcia@email.com",
-  "dni": "12345678A",
-  "phone": "+34 612 345 678",
-  "birth_date": "1985-03-15",
-  "address": "Calle Mayor 123, Madrid",
-  "created_at": "2025-01-15T10:00:00Z",
-  "policies": [
-    {
-      "id": "uuid",
-  "policy_type": "LIFE",
-  "status": "ACTIVE",
-  "premium_amount": "150.00"
-    }
-  ]
-}
-```
+**Response 200** — ver estructura en `GET /api/policies/customers/`.
 
 **Errores**
 - 404 — cliente no encontrado
@@ -213,51 +195,30 @@ Listar pólizas con filtros.
     {
       "id": "uuid",
       "policy_number": "POL-2025-000001",
-      "customer_id": "uuid",
-      "customer_name": "María García López",
       "policy_type": "LIFE",
       "status": "ACTIVE",
       "premium_amount": "150.00",
       "start_date": "2025-02-01",
-      "end_date": "2026-02-01"
+      "end_date": "2026-02-01",
+      "description": "",
+      "cancellation_reason": "",
+      "coverages": [],
+      "created_at": "2025-01-15T10:00:00Z",
+      "updated_at": "2025-01-15T10:00:00Z"
     }
   ]
 }
 ```
 
+> **Nota**: `customer_id` es `write_only` — se usa al crear/editar pero no se incluye en la respuesta.
+> La respuesta de detalle (GET `{id}/`) es idéntica al ítem de lista.
+
 ---
 
 ### GET /api/policies/policies/{id}/
-Detalle de póliza con coberturas.
+Detalle de póliza con coberturas. Misma estructura que el ítem de lista. `customer_id` no se incluye (write_only).
 
-**Response 200**
-```json
-{
-  "id": "uuid",
-  "policy_number": "POL-2025-000001",
-  "customer": {
-    "id": "uuid",
-    "full_name": "María García López",
-    "email": "maria.garcia@email.com"
-  },
-  "policy_type": "LIFE",
-  "status": "ACTIVE",
-  "start_date": "2025-02-01",
-  "end_date": "2026-02-01",
-  "premium_amount": "150.00",
-  "coverages": [
-    {
-      "id": "uuid",
-      "coverage_type": "LIFE",
-      "coverage_amount": "100000.00",
-      "description": "..."
-    }
-  ],
-  "documents": [],
-  "created_at": "2025-01-15T10:00:00Z",
-  "updated_at": "2025-01-15T10:00:00Z"
-}
-```
+**Response 200** — ver estructura en `GET /api/policies/policies/`.
 
 ---
 
@@ -415,7 +376,31 @@ Listar siniestros con filtros.
 - `incident_type` — `ACCIDENTE`, `ROBO`, `INCENDIO`, `INUNDACION`, `OTRO`
 - `ordering` — `filed_at`, `-filed_at`
 
-**Response 200** — lista paginada estándar.
+**Response 200** — lista paginada estándar. La vista de lista usa un serializer reducido:
+
+```json
+{
+  "count": 2605,
+  "next": "...",
+  "previous": null,
+  "results": [
+    {
+      "id": "uuid",
+      "claim_number": "CLM-2025-000001",
+      "policy_id": "uuid",
+      "claimant_name": "María García López",
+      "claimant_email": "maria.garcia@email.com",
+      "incident_date": "2025-01-10",
+      "incident_type": "ACCIDENTE",
+      "estimated_damage": "8500.00",
+      "status": "FILED",
+      "filed_at": "2025-01-15T10:00:00Z"
+    }
+  ]
+}
+```
+
+> **Nota**: `description`, `approved_amount`, `location`, `updated_at` y `status_history` solo se incluyen en la vista de detalle (`GET {id}/`).
 
 ---
 
@@ -429,17 +414,20 @@ Detalle de siniestro con historial de estados.
   "claim_number": "CLM-2025-000001",
   "policy_id": "uuid",
   "claimant_name": "María García López",
+  "claimant_email": "maria.garcia@email.com",
   "incident_date": "2025-01-10",
   "incident_type": "ACCIDENTE",
   "description": "...",
   "estimated_damage": "8500.00",
   "approved_amount": null,
+  "location": "Madrid",
   "status": "UNDER_REVIEW",
   "filed_at": "2025-01-15T10:00:00Z",
+  "updated_at": "2025-01-15T10:00:00Z",
   "documents": [],
   "status_history": [
     {
-      "from_status": null,
+      "from_status": "",
       "to_status": "FILED",
       "changed_at": "2025-01-15T10:00:00Z",
       "notes": "Siniestro reportado"
@@ -453,6 +441,8 @@ Detalle de siniestro con historial de estados.
   ]
 }
 ```
+
+> **Nota**: `from_status` es string vacío (`""`) para el estado inicial, no `null`.
 
 ---
 
@@ -583,34 +573,36 @@ Detalle de notificación con log de intentos.
 Listar eventos de auditoría. Read-only.
 
 **Query params**
-- `page`, `page_size`
+- `cursor` — cursor para paginación (no page-based)
+- `page_size` — resultados por página (default: 50)
 - `entity_type` — `policy`, `claim`
 - `entity_id` — UUID de la entidad
 - `event_type` — `policy.created`, `claim.filed`, etc.
 - `kafka_topic` — topic exacto
 - `from_date` — ISO 8601
 - `to_date` — ISO 8601
-- `ordering` — `occurred_at` (default), `-occurred_at`
 
-**Response 200**
+**Response 200** — cursor pagination (sin `count`). La vista de lista usa un serializer reducido:
+
 ```json
 {
-  "count": 12450,
   "next": "...",
+  "previous": null,
   "results": [
     {
       "id": "uuid",
-      "kafka_topic": "policy.created",
-      "kafka_offset": 1042,
+      "event_id": "uuid",
+      "event_type": "policy.created",
       "entity_type": "policy",
       "entity_id": "uuid",
-      "event_type": "policy.created",
-      "occurred_at": "2025-01-15T10:00:00Z",
-      "recorded_at": "2025-01-15T10:00:01Z"
+      "service": "policy-service",
+      "occurred_at": "2025-01-15T10:00:00Z"
     }
   ]
 }
 ```
+
+> **Nota**: `kafka_topic` y `payload` solo se incluyen en la vista de detalle (`GET {id}/`).
 
 ---
 
@@ -621,21 +613,19 @@ Detalle completo de un evento, incluyendo el payload del evento Kafka.
 ```json
 {
   "id": "uuid",
+  "event_id": "uuid",
+  "event_type": "claim.status_changed",
   "kafka_topic": "claim.status_changed",
-  "kafka_offset": 2318,
   "entity_type": "claim",
   "entity_id": "uuid",
-  "event_type": "claim.status_changed",
+  "service": "claims-service",
+  "occurred_at": "2025-01-16T09:00:00Z",
+  "received_at": "2025-01-16T09:00:01Z",
   "payload": {
     "claim_id": "uuid",
-    "claim_number": "CLM-2025-000001",
     "from_status": "FILED",
-    "to_status": "UNDER_REVIEW",
-    "changed_at": "2025-01-16T09:00:00Z",
-    "notes": "Asignado a perito García"
-  },
-  "occurred_at": "2025-01-16T09:00:00Z",
-  "recorded_at": "2025-01-16T09:00:01Z"
+    "to_status": "UNDER_REVIEW"
+  }
 }
 ```
 

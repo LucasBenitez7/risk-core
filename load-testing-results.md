@@ -257,6 +257,45 @@ El patrón de circuit breaker es relevante para el HTTP inter-service (claims→
 
 ---
 
+## Phase 7.5 retest — Uvicorn migration in audit-service
+
+> Migración de Daphne (single-process) a Uvicorn con 4 workers para resolver el bottleneck del Scenario 3.
+
+### Scenario 3 — Audit read (1000 users, 5 min) — post-Uvicorn
+
+| Endpoint | # Requests | Failures | p50 | p95 | p99 | RPS |
+|---|---|---|---|---|---|---|
+| GET list_audit_events | 22291 | 66.48% | 7500ms | 30000ms | 37000ms | 79.99 |
+
+### Comparación pre vs post Uvicorn
+
+| Metric | Daphne 1w (Phase 6) | Uvicorn 4w (Phase 7.5) | Improvement |
+|---|---|---|---|
+| Error rate | ~96% (504 timeouts) | 66.48% | ~30pp reduction |
+| p95 | timeout (>30s) | 30000ms | requests no longer queued at gateway |
+| Throughput | 56 req/s | 79.99 req/s | +24 req/s (~43%) |
+
+### Conclusión
+
+Uvicorn con 4 workers **mitigó** el bottleneck de Daphne single-process en audit-service:
+
+- **Error rate**: 96% → 66.48% (~30pp reduction)
+- **Throughput**: 56 → 79.99 req/s (+43%)
+- **Diagnóstico avanzado**: el error cambió de `504 Gateway Timeout` (Daphne queue saturada) a `500 Internal Server Error` (DB connection pool exhausted)
+
+**El bottleneck se movió de capa**: del servidor ASGI al pool de conexiones de PostgreSQL. Con 4 workers Uvicorn × N requests concurrentes, Django agota las 100 conexiones default de PG.
+
+**Próximos pasos para resolver completamente Scenario 3** (no aplicados en este retest):
+
+1. **`CONN_MAX_AGE = 60`** en Django settings — habilita persistent connections, reduce el churn de conexiones (~3 min de trabajo, debería bajar el error rate significativamente)
+2. **`psycopg-pool` o pgBouncer** — connection pooling real con max_pool_size configurable
+3. **Índice compuesto** en `audit_events(occurred_at DESC, id)` para optimizar el `LIMIT 25 ORDER BY occurred_at DESC` típico del endpoint
+4. **Aumentar `max_connections`** de PostgreSQL de 100 (default) a 300+ con `shared_buffers` ajustado proporcionalmente
+
+**Lectura para el portfolio**: esta es la dinámica real de tuning bajo carga — encontrás un bottleneck, lo resolvés, aparece el siguiente. La señal de valor no es alcanzar 0% errores, es diagnosticar cada capa correctamente.
+
+---
+
 ## Próximos pasos
 
 1. **Reemplazar `select_for_update()` en `generate_policy_number()`** por `uuid.uuid4()` o `INSERT ... RETURNING` — elimina el bottleneck principal de writes
