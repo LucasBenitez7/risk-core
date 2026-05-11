@@ -388,3 +388,66 @@ class TestOutboxIntegration:
 
         assert Policy.objects.count() == 0
         assert OutboxEvent.objects.count() == 0
+
+
+@pytest.mark.django_db
+class TestPolicyMetricsService:
+    def test_empty_db_returns_zeros(self):
+        result = PolicyService().get_metrics()
+        assert result["active_policies"] == 0
+        assert result["policies_today"] == 0
+        assert result["total_premium_active"] == "0.00"
+        assert result["policies_by_type"] == {
+            "LIFE": 0,
+            "HEALTH": 0,
+            "AUTO": 0,
+            "HOME": 0,
+            "BUSINESS": 0,
+        }
+
+    def test_counts_only_active_for_totals(self):
+        customer = Customer.objects.create(
+            full_name="Test", email="m1@test.com", dni="11111111A"
+        )
+        Policy.objects.create(
+            customer=customer,
+            policy_type=Policy.PolicyType.LIFE,
+            premium_amount="200.00",
+            start_date="2025-01-01",
+            end_date="2026-01-01",
+            status=Policy.Status.ACTIVE,
+        )
+        Policy.objects.create(
+            customer=customer,
+            policy_type=Policy.PolicyType.AUTO,
+            premium_amount="300.00",
+            start_date="2025-01-01",
+            end_date="2026-01-01",
+            status=Policy.Status.CANCELLED,
+        )
+        result = PolicyService().get_metrics()
+        assert result["active_policies"] == 1
+        assert result["total_premium_active"] == "200.00"
+        assert result["policies_by_type"]["LIFE"] == 1
+        assert result["policies_by_type"]["AUTO"] == 0
+
+    def test_policies_by_type_distribution(self):
+        customer = Customer.objects.create(
+            full_name="Test2", email="m2@test.com", dni="22222222A"
+        )
+        for policy_type in [
+            Policy.PolicyType.LIFE,
+            Policy.PolicyType.LIFE,
+            Policy.PolicyType.HOME,
+        ]:
+            Policy.objects.create(
+                customer=customer,
+                policy_type=policy_type,
+                premium_amount="100.00",
+                start_date="2025-01-01",
+                end_date="2026-01-01",
+            )
+        result = PolicyService().get_metrics()
+        assert result["policies_by_type"]["LIFE"] == 2
+        assert result["policies_by_type"]["HOME"] == 1
+        assert result["policies_by_type"]["AUTO"] == 0
