@@ -7,6 +7,10 @@ class AuditEventsConsumer(AsyncWebsocketConsumer):
     GROUP = "audit_events"
 
     async def connect(self):
+        if self.scope.get("user_id") is None:
+            await self.close(code=4001)
+            return
+
         await self.channel_layer.group_add(self.GROUP, self.channel_name)
         await self.accept()
 

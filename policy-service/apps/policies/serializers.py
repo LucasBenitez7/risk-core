@@ -105,3 +105,10 @@ class PolicyVerifySerializer(serializers.Serializer):
 
 class PolicyCancelSerializer(serializers.Serializer):
     reason = serializers.CharField(required=True, allow_blank=False)
+
+
+class PolicyMetricsSerializer(serializers.Serializer):
+    active_policies = serializers.IntegerField()
+    policies_today = serializers.IntegerField()
+    policies_by_type = serializers.DictField(child=serializers.IntegerField())
+    total_premium_active = serializers.CharField()

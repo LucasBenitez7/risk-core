@@ -205,3 +205,40 @@ class TestPolicyViews:
         assert response.status_code == 404
         assert "error" in response.data
         assert response.data["error"]["code"] == "POLICY_NOT_FOUND"
+
+
+@pytest.mark.django_db
+class TestPolicyMetricsView:
+    def test_metrics_returns_200_with_schema(self, api_client):
+        response = api_client.get("/api/policies/metrics/")
+        assert response.status_code == 200
+        data = response.data
+        assert "active_policies" in data
+        assert "policies_today" in data
+        assert "policies_by_type" in data
+        assert "total_premium_active" in data
+        assert isinstance(data["active_policies"], int)
+        assert isinstance(data["policies_by_type"], dict)
+
+    def test_metrics_requires_auth(self, api_client_no_auth):
+        response = api_client_no_auth.get("/api/policies/metrics/")
+        assert response.status_code == 401
+
+    def test_metrics_reflects_real_data(self, api_client):
+        from apps.policies.models import Customer, Policy
+
+        customer = Customer.objects.create(
+            full_name="Metrics User", email="metrics@test.com", dni="99999999A"
+        )
+        Policy.objects.create(
+            customer=customer,
+            policy_type=Policy.PolicyType.AUTO,
+            premium_amount="500.00",
+            start_date="2025-01-01",
+            end_date="2026-01-01",
+            status=Policy.Status.ACTIVE,
+        )
+        response = api_client.get("/api/policies/metrics/")
+        assert response.status_code == 200
+        assert response.data["active_policies"] >= 1
+        assert response.data["policies_by_type"]["AUTO"] >= 1

@@ -319,3 +319,62 @@ class TestGetClaimsQueryset:
         )
         qs = ClaimService().get_claims_queryset()
         assert qs.count() == 2
+
+
+@pytest.mark.django_db
+class TestClaimMetricsService:
+    def test_empty_db_returns_zeros(self):
+        from apps.claims.services import ClaimService
+
+        result = ClaimService().get_metrics()
+        assert result["open_claims"] == 0
+        assert result["claims_today"] == 0
+        assert result["avg_resolution_days"] == 0.0
+        assert result["claims_by_status"] == {
+            "FILED": 0,
+            "UNDER_REVIEW": 0,
+            "APPROVED": 0,
+            "REJECTED": 0,
+            "RESOLVED": 0,
+        }
+
+    def test_open_claims_excludes_resolved(self):
+        from apps.claims.models import Claim
+        from apps.claims.services import ClaimService
+        from apps.claims.tests.conftest import ClaimFactory
+
+        ClaimFactory(status=Claim.Status.FILED)
+        ClaimFactory(status=Claim.Status.UNDER_REVIEW)
+        ClaimFactory(status=Claim.Status.RESOLVED)
+
+        result = ClaimService().get_metrics()
+        assert result["open_claims"] == 2
+        assert result["claims_by_status"]["RESOLVED"] == 1
+        assert result["claims_by_status"]["FILED"] == 1
+
+    def test_avg_resolution_days(self):
+        from datetime import timedelta
+
+        from apps.claims.models import Claim, ClaimStatusHistory
+        from apps.claims.services import ClaimService
+
+        claim = Claim.objects.create(
+            policy_id="00000000-0000-0000-0000-000000000001",
+            claimant_name="Test",
+            claimant_email="avg@test.com",
+            incident_date="2025-01-01",
+            incident_type=Claim.IncidentType.ACCIDENTE,
+            description="test",
+            estimated_damage="100.00",
+            status=Claim.Status.RESOLVED,
+        )
+        # auto_now_add bypasses create(); use update() to set a specific date
+        history = ClaimStatusHistory.objects.create(
+            claim=claim,
+            to_status=Claim.Status.RESOLVED,
+        )
+        ClaimStatusHistory.objects.filter(pk=history.pk).update(
+            changed_at=claim.filed_at + timedelta(days=10)
+        )
+        result = ClaimService().get_metrics()
+        assert result["avg_resolution_days"] == 10.0

@@ -101,7 +101,7 @@ uv add --dev pytest pytest-django factory-boy ruff mypy django-stubs
 ## Docker Compose
 
 ```bash
-docker compose up -d                     # levantar todo en background
+docker compose -f infra/docker-compose.yml up -d                    # levantar todo en background
 docker compose down                      # bajar todo
 docker compose down -v                   # bajar todo + eliminar volumenes (DBs)
 docker compose logs -f [servicio]        # logs de un servicio en tiempo real
@@ -259,16 +259,6 @@ cd frontend
 pnpm test                  # todos los tests
 pnpm test:watch            # watch mode
 pnpm test:coverage         # coverage
-```
-
-### Frontend — Playwright (E2E)
-
-```bash
-cd frontend
-pnpm exec playwright install    # instalar browsers (una vez)
-pnpm test:e2e                   # correr tests E2E
-pnpm test:e2e --headed          # ver el browser
-pnpm test:e2e --debug           # debug paso a paso
 ```
 
 ---

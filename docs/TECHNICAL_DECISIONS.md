@@ -604,7 +604,7 @@ RUN uv sync --frozen --no-dev
 
 **Alternativa descartada — `transaction.on_commit(producer.produce)`**: parece equivalente pero no lo es. Si el proceso muere después del commit pero antes del callback `on_commit`, el evento se pierde. El outbox sobrevive a crashes de proceso porque el evento está en DB.
 
-**Verificación de fault tolerance** (test manual en `docs/PHASE_6_5_HARDENING.md` §3.9):
+**Verificación de fault tolerance** (test manual documentado en el plan archivado de Fase 6.5 dentro de `CONTEXT.md §3`):
 ```bash
 docker compose stop kafka
 curl -X POST .../api/policies/policies/  # → 201 OK inmediato
@@ -650,6 +650,29 @@ _policy_breaker = pybreaker.CircuitBreaker(
 
 ---
 
+## 26. Frontend — Next.js 15 App Router + RSC
+
+**Decisión**: Next.js 15 App Router con React Server Components por defecto. `"use client"` solo en componentes que necesitan interactividad (forms, WebSocket, hooks de estado del navegador).
+
+**Por qué App Router**: RSC reduce el JS enviado al cliente y mejora el TTFB. Las páginas de listado y detalle son mayoritariamente lectura — renderizarlas en el servidor es la opción correcta. El cliente solo recibe JS para los formularios de cancelación/transición y el feed de eventos.
+
+**JWT en httpOnly cookies + Next.js como proxy de auth**: el JWT nunca toca el contexto JS del navegador. Flujo:
+
+1. `POST /api/auth/login` (Route Handler de Next.js) recibe credenciales del cliente, llama al gateway `/api/auth/token/`, y setea `access_token` y `refresh_token` como cookies httpOnly + `SameSite=Lax` + `Secure` en producción. Devuelve solo `{ username }` al cliente. Un `username` no-httpOnly se setea para que la UI lo pueda mostrar.
+2. **Server Components** usan `serverFetch()` que lee la cookie con `next/headers` y agrega `Authorization: Bearer` directamente al request al gateway.
+3. **Client components** usan `apiFetch()` que pega a `/api/proxy/[...path]` (Route Handler genérico) — éste lee la cookie httpOnly, agrega el Bearer y reenvía al gateway. El cliente nunca ve el token.
+4. **WebSocket** llama primero a `/api/auth/ws-token` (Route Handler que devuelve el access token desde la cookie) para abrir `ws://gateway/ws/events/?token=<jwt>`. El token vive solo en memoria del client durante la vida del socket — nunca se persiste. Es la única ventana donde el JWT toca JS, y solo para ser pasado al WS handshake (Channels valida en su middleware).
+
+**Por qué este patrón en vez de pegar directo al gateway con `credentials: "include"`**: el gateway espera `Authorization: Bearer`, no cookies. Reenviar la cookie como header en otro origen es un CORS pain que además expone al gateway a cookies cross-origin. El proxy interno mantiene la cookie y el gateway desacoplados.
+
+**Zod como única fuente de tipos**: los schemas Zod en `lib/api/schemas.ts` son la fuente de verdad. Los tipos TypeScript se derivan con `z.infer<typeof schema>`. Nunca se duplican interfaces a mano — esto garantiza que si el backend cambia el schema, el frontend falla en tiempo de parse (runtime) en lugar de en producción silenciosamente.
+
+**WebSocket — validación JWT en Channels, no en nginx**: `auth_request` de nginx no funciona con Upgrade headers. El handshake HTTP→WS es una sola request; nginx no puede subrequestearla sin cerrar el upgrade. La solución es validar el token en el propio middleware de Django Channels (`JWTAuthMiddleware`) que parsea el `?token=` del query string con `simplejwt.tokens.AccessToken` (no hace DB hit — el token es auto-contenido). El gateway solo pasa el header `Upgrade`.
+
+**Backoff exponencial en WS**: 1s → 2s → 4s → … → cap 30s. Evita tormentas de reconexión tras un restart del servidor. La UI muestra "Reconectando…" para no confundir al usuario.
+
+---
+
 ## 25. Deploy — Railway
 
 **Decisión**: Railway para producción. Un proyecto Railway por microservicio.
@@ -659,5 +682,28 @@ _policy_breaker = pybreaker.CircuitBreaker(
 **Kafka en producción**: Upstash Kafka (managed, free tier, compatible con confluent-kafka) en lugar de desplegar Kafka propio.
 
 **Alternativa descartada**: Heroku. Eliminó el free tier y es más caro que Railway para el mismo resultado. Render es similar a Railway pero tiene menos opciones de networking entre servicios.
+
+---
+
+## 27. Uvicorn vs Daphne en audit-service
+
+**Decisión**: Reemplazar Daphne por Uvicorn con 4 workers en audit-service.
+
+**Problema**: El load test Scenario 3 (1000 usuarios concurrentes, solo lectura sobre 10k eventos de auditoría) mostró ~96% de errores 504 (Gateway Timeout) con Daphne. Daphne es single-process y no soporta múltiples workers — con 1000 usuarios, las requests se encolan y el gateway corta a los 30s.
+
+**Resultado post-migración**:
+- Error rate: ~96% → 66.48%
+- Throughput: 56 req/s → 79.99 req/s
+- p50: timeout (>30s) → 7500ms
+- Tipo de error: 504 (gateway timeout) → 500 (DB connection pool exhausted)
+
+**Interpretación**: Uvicorn mitigó el bottleneck de Daphne single-process, pero expuso el siguiente cuello de botella: el pool de conexiones de PostgreSQL. Con 4 workers, audit-service acepta más requests concurrentes de las que la base de datos puede atender con la configuración por defecto (`max_connections=100` compartido entre todos los servicios). Los 500s son `django.db.utils.OperationalError: FATAL: sorry, too many clients already`.
+
+**Por qué Uvicorn y no Daphne**:
+- Uvicorn soporta múltiples workers nativamente (`--workers 4`)
+- `uvicorn[standard]` incluye `websockets`, `uvloop` y `httptools` — compatible con Django Channels 4.1
+- Daphne está diseñado para desarrollo; en producción se recomienda Uvicorn o Hypercorn para mayor throughput
+
+**Próximo paso**: Para resolver completamente Scenario 3, se requiere tuning del pool de conexiones (CONN_MAX_AGE en Django, pgBouncer, o aumentar `max_connections` en PostgreSQL) o reducir el número de workers de Uvicorn hasta que el DB pool no se agote.
 
 ---

@@ -40,3 +40,10 @@ class NotificationListSerializer(serializers.ModelSerializer):
             "created_at",
         ]
         read_only_fields = fields
+
+
+class NotificationMetricsSerializer(serializers.Serializer):
+    sent_today = serializers.IntegerField()
+    failed_today = serializers.IntegerField()
+    pending = serializers.IntegerField()
+    success_rate_7d = serializers.FloatField()

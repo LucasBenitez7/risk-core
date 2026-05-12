@@ -100,3 +100,10 @@ class ClaimTransitionSerializer(serializers.Serializer):
                 }
             )
         return attrs
+
+
+class ClaimsMetricsSerializer(serializers.Serializer):
+    open_claims = serializers.IntegerField()
+    claims_today = serializers.IntegerField()
+    claims_by_status = serializers.DictField(child=serializers.IntegerField())
+    avg_resolution_days = serializers.FloatField()
