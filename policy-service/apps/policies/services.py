@@ -1,7 +1,10 @@
 import uuid
+from decimal import ROUND_HALF_UP, Decimal
 
 import structlog
 from django.db import transaction
+from django.db.models import Count, Sum
+from django.utils import timezone
 
 from apps.core.exceptions import (
     CustomerNotFoundError,
@@ -141,6 +144,32 @@ class PolicyService:
             "is_valid": policy.status == Policy.Status.ACTIVE,
             "customer_id": str(policy.customer_id),
             "policy_type": policy.policy_type,
+        }
+
+    def get_metrics(self) -> dict:
+        today = timezone.now().date()
+        active_qs = Policy.objects.filter(status=Policy.Status.ACTIVE)
+
+        by_type_qs = (
+            active_qs.values("policy_type")
+            .annotate(count=Count("id"))
+            .order_by("policy_type")
+        )
+        policies_by_type = dict.fromkeys(Policy.PolicyType.values, 0)
+        for row in by_type_qs:
+            policies_by_type[row["policy_type"]] = row["count"]
+
+        total_premium = active_qs.aggregate(total=Sum("premium_amount"))[
+            "total"
+        ] or Decimal("0")
+
+        return {
+            "active_policies": active_qs.count(),
+            "policies_today": Policy.objects.filter(created_at__date=today).count(),
+            "policies_by_type": policies_by_type,
+            "total_premium_active": str(
+                Decimal(total_premium).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            ),
         }
 
     def get_policies_queryset(

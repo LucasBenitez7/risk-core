@@ -64,7 +64,6 @@ El único permiso válido es que el usuario diga explícitamente: *"sí, commite
 | `test-driven-development` | Escribir tests | Útil para patrones, pero el orden del plan manda (no TDD estricto) |
 | `code-review-excellence` | Revisar código antes de PR | Usar para revisión final, no durante implementación |
 | `next-best-practices` | Trabajo en frontend Next.js (solo Fase 7) | Solo App Router, nunca Pages Router |
-| `webapp-testing` | Tests E2E con Playwright (solo Fase 7) | — |
 
 ### Slash commands (`.claude/commands/`)
 
@@ -170,8 +169,7 @@ Invocar con `/nombre` en Claude Code. Están en `.claude/commands/`.
 | React Hook Form + Zod | 7.x / 4.x |
 | Zustand | 5.x |
 | Sonner | 2.x |
-| Vitest + Testing Library | 4.x / 16.x |
-| Playwright | 1.58.x |
+| Vitest + Testing Library | 3.x / 16.x |
 | MSW | 2.x |
 | ESLint 9 + Prettier | 9.x / 3.x |
 | Husky + lint-staged | 9.x / 16.x |

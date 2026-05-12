@@ -11,4 +11,4 @@ RUN python manage.py migrate --noinput 2>/dev/null || true
 
 EXPOSE 8004
 
-CMD ["daphne", "-b", "0.0.0.0", "-p", "8004", "config.asgi:application"]
+CMD ["uvicorn", "config.asgi:application", "--host", "0.0.0.0", "--port", "8004", "--workers", "4"]

@@ -102,6 +102,22 @@ for i in $(seq 1 30); do
     if [[ "$i" == "30" ]]; then fail "Never got RATE_LIMIT_EXCEEDED in response body"; fi
 done
 
+# 9. WS handshake passes through gateway (route exists, proxies to audit-service)
+echo "--- [9] WebSocket route exists ---"
+# Verify that /ws/events/ is configured in nginx and proxies to audit-service.
+# curl cannot complete a real WebSocket handshake, so the upstream (Daphne)
+# treats this as an HTTP request. The key check: the gateway does NOT return
+# 404 (route missing) or 502 (upstream unreachable).
+WS_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    -H "Connection: Upgrade" \
+    -H "Upgrade: websocket" \
+    "$GATEWAY/ws/events/")
+if [[ "$WS_CODE" != "404" && "$WS_CODE" != "502" && "$WS_CODE" != "503" ]]; then
+    ok "GET /ws/events/ → $WS_CODE (route exists, upstream reachable)"
+else
+    fail "GET /ws/events/ → $WS_CODE (expected non-404/502/503)"
+fi
+
 echo ""
 echo "=== Results: $PASS passed, $FAIL failed ==="
 echo ""

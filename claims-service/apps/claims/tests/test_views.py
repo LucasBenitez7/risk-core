@@ -269,3 +269,39 @@ class TestClaimTransitionView:
             format="json",
         )
         assert response.status_code == 401
+
+
+@pytest.mark.django_db
+class TestClaimsMetricsView:
+    def test_metrics_returns_200_with_schema(self, api_client):
+        response = api_client.get("/api/claims/metrics/")
+        assert response.status_code == 200
+        data = response.data
+        assert "open_claims" in data
+        assert "claims_today" in data
+        assert "claims_by_status" in data
+        assert "avg_resolution_days" in data
+        assert isinstance(data["open_claims"], int)
+        assert isinstance(data["claims_by_status"], dict)
+
+    def test_metrics_requires_auth(self, api_client_no_auth):
+        response = api_client_no_auth.get("/api/claims/metrics/")
+        assert response.status_code == 401
+
+    def test_metrics_reflects_real_data(self, api_client):
+        from apps.claims.models import Claim
+
+        Claim.objects.create(
+            policy_id="00000000-0000-0000-0000-000000000002",
+            claimant_name="View Test",
+            claimant_email="viewtest@test.com",
+            incident_date="2025-01-01",
+            incident_type=Claim.IncidentType.ROBO,
+            description="test",
+            estimated_damage="200.00",
+            status=Claim.Status.FILED,
+        )
+        response = api_client.get("/api/claims/metrics/")
+        assert response.status_code == 200
+        assert response.data["open_claims"] >= 1
+        assert response.data["claims_by_status"]["FILED"] >= 1

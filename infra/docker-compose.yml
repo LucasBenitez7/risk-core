@@ -38,7 +38,7 @@ services:
       KAFKA_PROCESS_ROLES: broker,controller
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
       KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
@@ -145,7 +145,7 @@ services:
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
       - POLICY_SERVICE_URL=http://policy-web:8001
       - POLICY_SERVICE_TIMEOUT=5
-    command: gunicorn config.wsgi:application -w 4 -k gthread --bind 0.0.0.0:8002
+    command: sh -c "python manage.py migrate && python -c \"import django; import os; os.environ.setdefault('DJANGO_SETTINGS_MODULE','config.settings.development'); django.setup(); from django.contrib.auth.models import User; User.objects.filter(username='admin').exists() or User.objects.create_superuser('admin','admin@riskcore.com','admin')\" && gunicorn config.wsgi:application -w 4 -k gthread --bind 0.0.0.0:8002"
     ports:
       - "8002:8002"
     depends_on:
@@ -182,7 +182,7 @@ services:
       - EMAIL_HOST_USER=
       - EMAIL_HOST_PASSWORD=
       - DEFAULT_FROM_EMAIL=noreply@riskcore.com
-    command: gunicorn config.wsgi:application -w 4 -k gthread --bind 0.0.0.0:8003
+    command: sh -c "python manage.py migrate && python -c \"import django; import os; os.environ.setdefault('DJANGO_SETTINGS_MODULE','config.settings.development'); django.setup(); from django.contrib.auth.models import User; User.objects.filter(username='admin').exists() or User.objects.create_superuser('admin','admin@riskcore.com','admin')\" && gunicorn config.wsgi:application -w 4 -k gthread --bind 0.0.0.0:8003"
     ports:
       - "8003:8003"
     depends_on:
@@ -216,6 +216,7 @@ services:
       - DB_PORT=5432
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
       - REDIS_URL=redis://redis:6379/1
+    command: sh -c "python manage.py migrate && python -c \"import django; import os; os.environ.setdefault('DJANGO_SETTINGS_MODULE','config.settings.development'); django.setup(); from django.contrib.auth.models import User; User.objects.filter(username='admin').exists() or User.objects.create_superuser('admin','admin@riskcore.com','admin')\" && uvicorn config.asgi:application --host 0.0.0.0 --port 8004 --workers 4"
     ports:
       - "8004:8004"
     depends_on:
@@ -232,6 +233,33 @@ services:
         max-file: "3"
     networks:
       - riskcore
+
+  # ─── audit-consumer ──────────────────────────────
+  audit-consumer:
+    build:
+      context: ../audit-service
+    command: ["python", "manage.py", "run_consumer"]
+    environment:
+      - SECRET_KEY=dev-secret-key
+      - DEBUG=True
+      - DB_NAME=riskcore_audit
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - REDIS_URL=redis://redis:6379/1
+      - DJANGO_SETTINGS_MODULE=config.settings.development
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - riskcore
+    restart: unless-stopped
 
   # ─── Outbox Relays ────────────────────────────────
   policy-outbox-relay:
@@ -368,6 +396,26 @@ services:
       - gateway-loadtest
     profiles:
       - loadtest
+    networks:
+      - riskcore
+
+  # ─── Frontend ──────────────────────────────────────
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3001:3001"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8080
+      NEXT_PUBLIC_WS_URL: ws://localhost:8080/ws/events/
+    depends_on:
+      - gateway
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks:
       - riskcore
 

@@ -1,8 +1,9 @@
 from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.mixins import CreateModelMixin, ListModelMixin, RetrieveModelMixin
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.views import APIView
 from rest_framework.viewsets import GenericViewSet, ModelViewSet
 
 from apps.core.pagination import StandardPagination
@@ -10,10 +11,19 @@ from apps.policies.models import Customer
 from apps.policies.serializers import (
     CustomerSerializer,
     PolicyCancelSerializer,
+    PolicyMetricsSerializer,
     PolicySerializer,
     PolicyVerifySerializer,
 )
 from apps.policies.services import PolicyService
+
+
+class PolicyMetricsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        data = PolicyService().get_metrics()
+        return Response(PolicyMetricsSerializer(data).data)
 
 
 class CustomerViewSet(
