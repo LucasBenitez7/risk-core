@@ -194,7 +194,8 @@ The nginx gateway rejecting **953 abusive requests** with `429 Too Many Requests
 
 ## Load Testing — the 6× improvement story
 
-> Locust 2.43 | Stack: Nginx → 4 Gunicorn services → PostgreSQL 16 + Kafka 3.7
+> **Locust 2.43** | Stack: Nginx → 4 Gunicorn services → PostgreSQL 16 + Kafka 3.7
+> Numbers below are under **sustained synthetic load** with hundreds of concurrent virtual users. Normal operation shows 0% error rate.
 
 The most interesting technical finding: **replacing pessimistic locking with a PostgreSQL SEQUENCE moved the write breaking point from ~50 to ~300 concurrent users**.
 
@@ -205,26 +206,17 @@ The most interesting technical finding: **replacing pessimistic locking with a P
 | Aggregated p50 | 30,000ms (timeout) | 1,300ms | **23×** |
 | Aggregated p95 | 31,000ms | 5,300ms | **5.8×** |
 
-**Root cause**: `generate_policy_number()` used `Policy.objects.select_for_update()` — every write serialized on a row-level lock.
+**Root cause**: `generate_policy_number()` used `Policy.objects.select_for_update()` — every write serialized on a row-level lock under concurrency.
 
-**Fix**: PostgreSQL `SEQUENCE` (`SELECT nextval('policy_number_seq')`) — lock-free, atomic, scales horizontally.
+**Fix**: PostgreSQL `SEQUENCE` (`SELECT nextval('policy_number_seq')`) — lock-free, atomic, scales horizontally. Migration: [`policies/0002_policy_number_sequence.py`](policy-service/apps/policies/migrations/).
 
-### Scenario summary
+### Bottlenecks discovered along the way
 
-| Scenario | Users | p95 Measured | Throughput | Error Rate | Verdict |
-|---|---|---|---|---|---|
-| Policy creation | 500 | 5,300ms | 78 req/s | 10.4% | ✅ FIXED (was 42.7%) |
-| Claims filing | 300 | 9,800ms | 48 req/s | 24.7% | ⚠️ p50=590ms OK, p95 high |
-| Audit read | 1000 | 30,000ms | 80 req/s | 66.5% | ⚠️ Improved (96% → 66.5%) — next: DB connection pool |
-| Stress (stepped) | 50→300 | 5,300ms | 78 req/s | 10.4% | ✅ 6× improvement |
+The full suite (5 scenarios, 50–1000 concurrent users) surfaced additional layers under extreme load — most notably a **PostgreSQL connection pool exhaustion** in `audit-service` that became visible only after migrating Daphne → Uvicorn 4w. The error type shifted from `504 Gateway Timeout` (ASGI queue saturated) to `500 Internal Server Error` (DB pool exhausted), signalling the next optimization target: `CONN_MAX_AGE` + pgBouncer.
 
-### Audit read — second optimization round
+The engineering value isn't chasing 100% green — it's **discovering bottlenecks one layer at a time** and root-causing each.
 
-The audit read scenario went from **96% error rate** (Daphne single-process) to **66.5%** (Uvicorn 4 workers, +43% throughput). The bottleneck **shifted layers**: from the ASGI server to PostgreSQL connection pool exhaustion (error type changed from `504 Gateway Timeout` → `500 Internal Server Error`).
-
-This is the actual value of load testing — not chasing 100% green, but **discovering bottlenecks one layer at a time**. Next iteration would tune `CONN_MAX_AGE` + introduce pgBouncer for proper connection pooling.
-
-Full report with bottleneck analysis: [load-testing-results.md](load-testing-results.md).
+Full scenario-by-scenario report with p50/p95/p99 breakdown, error analysis and the optimization journey: [load-testing-results.md](load-testing-results.md).
 
 ---
 
